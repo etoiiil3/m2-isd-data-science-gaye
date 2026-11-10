@@ -144,8 +144,7 @@ def train_word_models(train: dict[str, list[np.ndarray]], n_states: int = 5, n_m
 
 
 def recognise_isolated(wm: WordModels, feats: np.ndarray, vocab: list[str]) -> str:
-    raise NotImplementedError("TODO(d1): return the word whose model gives the highest log-likelihood")
-
+        return max(vocab, key=lambda w: wm.models[w].score(feats))
 
 # --------------------------------------------------------------------------- #
 # Connected-word decoding: one big HMM = loop over all word HMMs.
