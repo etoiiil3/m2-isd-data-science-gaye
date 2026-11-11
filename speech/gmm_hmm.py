@@ -144,7 +144,16 @@ def train_word_models(train: dict[str, list[np.ndarray]], n_states: int = 5, n_m
 
 
 def recognise_isolated(wm: WordModels, feats: np.ndarray, vocab: list[str]) -> str:
-    raise NotImplementedError("TODO(d1): return the word whose model gives the highest log-likelihood")
+    if not vocab:
+        raise ValueError("vocab must contain at least one word")
+
+    best_word = vocab[0]
+    best_score = wm.models[best_word].score(feats)
+    for word in vocab[1:]:
+        score = wm.models[word].score(feats)
+        if score > best_score:
+            best_word, best_score = word, score
+    return best_word
 
 
 # --------------------------------------------------------------------------- #
