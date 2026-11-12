@@ -8,6 +8,7 @@ in a 25 h project.  Word models on a small vocabulary keep every concept (MFCC, 
 emissions, HMM topology, Viterbi, LM integration, LM weight, insertion penalty) visible
 in ~200 lines of numpy, which is the pedagogical point of the baseline.
 """
+
 from __future__ import annotations
 
 import time
@@ -21,15 +22,30 @@ from hmmlearn.hmm import GMMHMM
 # --------------------------------------------------------------------------- #
 # Features
 # --------------------------------------------------------------------------- #
-def mfcc_features(y: np.ndarray, sr: int, n_mfcc: int = 13, win_ms: float = 25, hop_ms: float = 10,
-                  deltas: bool = True, cmvn: bool = False) -> np.ndarray:
+def mfcc_features(
+    y: np.ndarray,
+    sr: int,
+    n_mfcc: int = 13,
+    win_ms: float = 25,
+    hop_ms: float = 10,
+    deltas: bool = True,
+    cmvn: bool = False,
+) -> np.ndarray:
     """(T, D) MFCC (+delta, +delta-delta). cmvn=True -> per-utterance normalisation.
     For connected-word decoding prefer a GLOBAL normaliser (see Normaliser) so that isolated
     training words and long test utterances share the same feature statistics."""
     n_fft = int(round(sr * win_ms / 1000))
     hop = int(round(sr * hop_ms / 1000))
-    m = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc, n_fft=n_fft, hop_length=hop,
-                             win_length=n_fft, n_mels=40, fmax=sr / 2)
+    m = librosa.feature.mfcc(
+        y=y,
+        sr=sr,
+        n_mfcc=n_mfcc,
+        n_fft=n_fft,
+        hop_length=hop,
+        win_length=n_fft,
+        n_mels=40,
+        fmax=sr / 2,
+    )
     feats = [m]
     if deltas and m.shape[1] >= 9:
         feats += [librosa.feature.delta(m, order=1), librosa.feature.delta(m, order=2)]
@@ -53,10 +69,12 @@ class Normaliser:
         return (f - self.mu) / self.sd
 
 
-def add_noise(y: np.ndarray, snr_db: float | None, rng: np.random.Generator) -> np.ndarray:
+def add_noise(
+    y: np.ndarray, snr_db: float | None, rng: np.random.Generator
+) -> np.ndarray:
     if snr_db is None:
         return y
-    p_sig = np.mean(y ** 2) + 1e-12
+    p_sig = np.mean(y**2) + 1e-12
     p_noise = p_sig / (10 ** (snr_db / 10))
     return y + rng.normal(0, np.sqrt(p_noise), size=y.shape)
 
@@ -64,11 +82,21 @@ def add_noise(y: np.ndarray, snr_db: float | None, rng: np.random.Generator) -> 
 # --------------------------------------------------------------------------- #
 # Word models
 # --------------------------------------------------------------------------- #
-def left_to_right_hmm(n_states: int, n_mix: int, n_iter: int = 15, seed: int = 0) -> GMMHMM:
+def left_to_right_hmm(
+    n_states: int, n_mix: int, n_iter: int = 15, seed: int = 0
+) -> GMMHMM:
     """Bakis topology: each state loops or moves to the next one. EM keeps zeros at zero,
     so the topology is preserved during training."""
-    m = GMMHMM(n_components=n_states, n_mix=n_mix, covariance_type="diag", n_iter=n_iter,
-               random_state=seed, init_params="mcw", params="stmcw", min_covar=1e-3)
+    m = GMMHMM(
+        n_components=n_states,
+        n_mix=n_mix,
+        covariance_type="diag",
+        n_iter=n_iter,
+        random_state=seed,
+        init_params="mcw",
+        params="stmcw",
+        min_covar=1e-3,
+    )
     m.startprob_ = np.eye(n_states)[0]
     A = np.zeros((n_states, n_states))
     for i in range(n_states):
@@ -101,6 +129,7 @@ def uniform_segmentation_init(m: GMMHMM, seqs: list[np.ndarray], seed: int = 0):
     GMM per state on its chunk frames. Much more robust than k-means on pooled frames
     (which often leaves a state with an empty mixture component -> NaNs)."""
     from sklearn.mixture import GaussianMixture
+
     S, M = m.n_components, m.n_mix
     D = seqs[0].shape[1]
     per_state = [[] for _ in range(S)]
@@ -114,19 +143,36 @@ def uniform_segmentation_init(m: GMMHMM, seqs: list[np.ndarray], seed: int = 0):
     for s in range(S):
         X = np.concatenate(per_state[s])
         k = min(M, max(1, len(X) // 10))
-        g = GaussianMixture(k, covariance_type="diag", reg_covar=1e-3, random_state=seed, max_iter=50).fit(X)
-        means[s, :k], covars[s, :k], weights[s, :k] = g.means_, g.covariances_, g.weights_
+        g = GaussianMixture(
+            k, covariance_type="diag", reg_covar=1e-3, random_state=seed, max_iter=50
+        ).fit(X)
+        means[s, :k], covars[s, :k], weights[s, :k] = (
+            g.means_,
+            g.covariances_,
+            g.weights_,
+        )
         if k < M:  # pad unused components with perturbed copies
             for j in range(k, M):
-                means[s, j] = g.means_[0] + 0.1 * np.random.default_rng(seed + j).standard_normal(D)
+                means[s, j] = g.means_[0] + 0.1 * np.random.default_rng(
+                    seed + j
+                ).standard_normal(D)
                 covars[s, j] = g.covariances_[0]
             weights[s] = 1.0 / M
-    m.means_, m.covars_, m.weights_ = means, covars, weights / weights.sum(1, keepdims=True)
+    m.means_, m.covars_, m.weights_ = (
+        means,
+        covars,
+        weights / weights.sum(1, keepdims=True),
+    )
     m.n_features = D
 
 
-def train_word_models(train: dict[str, list[np.ndarray]], n_states: int = 5, n_mix: int = 2,
-                      n_iter: int = 8, seed: int = 0) -> WordModels:
+def train_word_models(
+    train: dict[str, list[np.ndarray]],
+    n_states: int = 5,
+    n_mix: int = 2,
+    n_iter: int = 8,
+    seed: int = 0,
+) -> WordModels:
     t0 = time.perf_counter()
     models = {}
     for w, seqs in train.items():
@@ -162,8 +208,15 @@ def recognise_isolated(wm: WordModels, feats: np.ndarray, vocab: list[str]) -> s
 # Because the source state identifies u, a bigram needs no state expansion.
 # --------------------------------------------------------------------------- #
 class WordLoopDecoder:
-    def __init__(self, wm: WordModels, vocab: list[str], bigram: dict | None = None,
-                 lm_weight: float = 1.0, word_penalty: float = 0.0, exit_logp: float = np.log(0.5)):
+    def __init__(
+        self,
+        wm: WordModels,
+        vocab: list[str],
+        bigram: dict | None = None,
+        lm_weight: float = 1.0,
+        word_penalty: float = 0.0,
+        exit_logp: float = np.log(0.5),
+    ):
         self.vocab = vocab
         self.wm = wm
         self.offsets, self.sizes = {}, {}
@@ -174,19 +227,58 @@ class WordLoopDecoder:
         self.S = o
         self.word_of_state = np.empty(self.S, dtype=object)
         for w in vocab:
-            self.word_of_state[self.offsets[w]:self.offsets[w] + self.sizes[w]] = w
+            self.word_of_state[self.offsets[w] : self.offsets[w] + self.sizes[w]] = w
         V = len(vocab)
         if bigram is None:  # acoustic-only: uniform "LM"
             bigram = {u: {v: 1.0 / V for v in vocab} for u in ["<s>"] + vocab}
         self.bigram = bigram
-        self.lm_weight, self.word_penalty, self.exit_logp = lm_weight, word_penalty, exit_logp
+        self.lm_weight, self.word_penalty, self.exit_logp = (
+            lm_weight,
+            word_penalty,
+            exit_logp,
+        )
         self._build()
 
     def _lm(self, u, v):
-        return self.lm_weight * np.log(max(self.bigram[u].get(v, 1e-12), 1e-12)) + self.word_penalty
+        return (
+            self.lm_weight * np.log(max(self.bigram[u].get(v, 1e-12), 1e-12))
+            + self.word_penalty
+        )
 
     def _build(self):
-        raise NotImplementedError("TODO(d1): build the composite log transition matrix: within-word transitions + (word end -> word start) with lm_weight*log P(v|u) + word_penalty; start probabilities from P(v|<s>); mark entry transitions")
+        # Log-domain transitions for the composite word-loop HMM.  Impossible
+        # transitions stay at -inf, so they cannot be selected by Viterbi.
+        self.log_transmat = np.full((self.S, self.S), -np.inf, dtype=np.float64)
+        self.entry_transitions = np.zeros((self.S, self.S), dtype=bool)
+        self.start_logprob = np.full(self.S, -np.inf, dtype=np.float64)
+        self.final_states = np.empty(len(self.vocab), dtype=int)
+
+        for wi, word in enumerate(self.vocab):
+            model = self.wm.models[word]
+            offset = self.offsets[word]
+            n_states = self.sizes[word]
+            stop = offset + n_states
+
+            # Keep the learned left-to-right transitions inside this word.
+            with np.errstate(divide="ignore"):
+                self.log_transmat[offset:stop, offset:stop] = np.log(model.transmat_)
+            self.final_states[wi] = stop - 1
+
+            # The utterance may begin with any vocabulary word. Its start
+            # probability comes from the LM history token <s>.
+            self.start_logprob[offset] = self._lm("<s>", word)
+
+        # A completed word may transition to the first state of any next word.
+        # The source word identifies the bigram history, so no state copies are
+        # needed. Mark these edges for word-boundary reconstruction by Viterbi.
+        for previous in self.vocab:
+            source = self.offsets[previous] + self.sizes[previous] - 1
+            for word in self.vocab:
+                destination = self.offsets[word]
+                self.log_transmat[source, destination] = self.exit_logp + self._lm(
+                    previous, word
+                )
+                self.entry_transitions[source, destination] = True
 
     def emissions(self, feats: np.ndarray) -> np.ndarray:
         """(T, S) log b_s(o_t) concatenated over word models."""
@@ -198,12 +290,54 @@ class WordLoopDecoder:
 
     def decode_emissions(self, B: np.ndarray, drop: tuple = ("sil",)) -> list[str]:
         """Viterbi on precomputed emissions (lets you sweep LM weights without recomputing GMMs)."""
-        raise NotImplementedError("TODO(d1): log-domain Viterbi over the composite HMM, end in a word-final state, backtrack, cut words at entry transitions, drop silence")
+        B = np.asarray(B, dtype=np.float64)
+        if B.ndim != 2 or B.shape[1] != self.S:
+            raise ValueError(f"B must have shape (T, {self.S}); got {B.shape}")
+        if B.shape[0] == 0:
+            return []
+
+        # best[t, s] is the best log-score for a path that emits frame t
+        # from state s. Store each winning predecessor to recover that path.
+        T = B.shape[0]
+        best = np.full((T, self.S), -np.inf, dtype=np.float64)
+        back = np.full((T, self.S), -1, dtype=np.int64)
+        best[0] = self.start_logprob + B[0]
+
+        for t in range(1, T):
+            candidates = best[t - 1, :, None] + self.log_transmat
+            back[t] = np.argmax(candidates, axis=0)
+            best[t] = candidates[back[t], np.arange(self.S)] + B[t]
+
+        # Only accept a completed word at the end of the utterance.
+        end_scores = best[-1, self.final_states]
+        if not np.isfinite(end_scores).any():
+            raise ValueError("no valid word path for these emissions")
+        state = int(self.final_states[np.argmax(end_scores)])
+
+        path = np.empty(T, dtype=np.int64)
+        path[-1] = state
+        for t in range(T - 1, 0, -1):
+            path[t - 1] = back[t, path[t]]
+
+        # A word starts at frame zero, then whenever the path uses a marked
+        # word-exit -> next-word-entry edge. Silence can be omitted afterwards.
+        words = [self.word_of_state[path[0]]]
+        for t in range(1, T):
+            if self.entry_transitions[path[t - 1], path[t]]:
+                words.append(self.word_of_state[path[t]])
+        return [word for word in words if word not in drop]
 
 
 # --------------------------------------------------------------------------- #
 # Bigram LM with add-k smoothing
 # --------------------------------------------------------------------------- #
-def train_bigram(sentences: list[list[str]], vocab: list[str], k: float = 0.1,
-                 sil_token: str | None = "sil", p_sil: float = 0.15) -> dict:
-    raise NotImplementedError("TODO(d1): add-k bigram P(v|u) with <s>; silence handled as documented; every row must sum to 1")
+def train_bigram(
+    sentences: list[list[str]],
+    vocab: list[str],
+    k: float = 0.1,
+    sil_token: str | None = "sil",
+    p_sil: float = 0.15,
+) -> dict:
+    raise NotImplementedError(
+        "TODO(d1): add-k bigram P(v|u) with <s>; silence handled as documented; every row must sum to 1"
+    )
