@@ -85,7 +85,22 @@ The run emitted a scikit-learn GMM initialization convergence warning during S5M
 
 ## N-gram language model evaluation
 
-**Pending.** The `--part lm` experiment has not yet been run, so there are no measured perplexity results to interpret here. It will compare orders 1–5, training corpus sizes, and add-k versus interpolated smoothing on a synthetic digit grammar whose next digit depends on the previous two. Add the resulting perplexity table and discuss which order/smoothing combination works best at each training size after the run.
+The experiment compared n-gram orders 1–5 and two smoothing methods on a synthetic digit grammar where the next digit depends on the previous two. It used 50, 500, and 5,000 training sentences and the same generated test set of 1,000 sentences. Lower perplexity is better.
+
+| Training sentences | Smoothing | 1-gram | 2-gram | 3-gram | 4-gram | 5-gram | Best order |
+|---:|---|---:|---:|---:|---:|---:|---|
+| 50 | Add-k | 10.75 | 11.15 | 8.08 | 8.61 | 8.63 | 3 |
+| 50 | Interpolated | 10.75 | 9.77 | 7.76 | **7.73** | 7.99 | 4 |
+| 500 | Add-k | 10.69 | 8.99 | **5.69** | 6.65 | 7.16 | 3 |
+| 500 | Interpolated | 10.69 | 9.19 | 6.00 | **5.83** | 6.22 | 4 |
+| 5,000 | Add-k | 10.69 | 8.89 | **5.05** | 5.16 | 5.67 | 3 |
+| 5,000 | Interpolated | 10.69 | 9.14 | 5.73 | **5.17** | 5.23 | 4 |
+
+The unigram baseline stays near 10.7, while trigrams improve substantially because they can use the two-token context that generated the data. With 500 and 5,000 sentences, the add-k trigram is best overall. This matches the source grammar's true order. With only 50 sentences, the interpolated 4-gram has the lowest perplexity (7.73), narrowly beating the interpolated trigram (7.76): mixing shorter-order estimates helps when longer histories are sparse. Interpolation also helps the 4- and 5-gram estimates at the larger training sizes, although the add-k trigram remains best overall.
+
+Higher order does not automatically improve perplexity. For example, at 5,000 training sentences, the add-k 5-gram scores 5.67, worse than the trigram's 5.05. The model has to estimate many more distinct histories and continuations: the number of distinct n-gram entries across all orders grows from 1,035 for the 3-gram to 12,693 for the 5-gram. These results illustrate the trade-off between context length and data sparsity. They come from one fixed synthetic test set, so small differences should be treated as suggestive rather than universal.
+
+The run produced 30 `ngram_lm` rows tagged `cfg_milestone=d1` in `results/results.jsonl` and the full measurements in `results/speech_classical/ngram_perplexity.csv`.
 
 ## Limits and next measurements
 
