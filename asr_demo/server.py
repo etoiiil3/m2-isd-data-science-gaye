@@ -6,7 +6,7 @@ Protocol (one WebSocket per recording, backend chosen per recording):
   client -> {"type":"start","backend":NAME,"reference":optional text}
   client -> binary chunks: float32 mono 16 kHz, ~100 ms each, while the record button is down
   client -> {"type":"stop"}
-  server -> {"type":"loading"} (first use of a backend) · {"type":"partial","text","t_ms"} · {"type":"final",...metrics}
+  server -> {"type":"loading"} (first use of a backend; the page also preloads it via POST /api/load on selection) · {"type":"partial","text","t_ms"} · {"type":"final",...metrics}
 Every request is logged to results/results.jsonl (task demo) and its audio saved for replay on other backends.
 """
 from __future__ import annotations
@@ -110,6 +110,29 @@ async def ws_endpoint(ws: WebSocket):
         traceback.print_exc()
         with contextlib.suppress(Exception):
             await ws.send_json({"type": "error", "message": f"{name}: {backends.explain(e)}" if name else backends.explain(e)})
+    finally:  # a proper close: returning without one drops the TCP connection, and the browser may lose our last message
+        with contextlib.suppress(Exception):
+            await ws.close()
+
+
+class LoadRequest(BaseModel):
+    backend: str
+
+
+@app.post("/api/load")
+async def load(req: LoadRequest):
+    """Load a backend as soon as it is selected, so the first recording does not wait (and a stub is reported now)."""
+    try:
+        await asyncio.to_thread(backends.get, req.backend)
+    except backends.BackendUnavailable as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"loaded": True}
+
+
+@app.get("/api/prompt")
+def prompt(backend: str):
+    """A sentence suited to this backend (digits for the day-1 entries), or null: the page then uses its own list."""
+    return {"text": backends.prompt(backend)}
 
 
 class ReplayRequest(BaseModel):
@@ -136,7 +159,11 @@ async def replay(req: ReplayRequest):
 
 def main():
     import argparse
+    import importlib.util
     import uvicorn
+    if not any(importlib.util.find_spec(m) for m in ("websockets", "wsproto")):
+        raise SystemExit("no WebSocket library: live recording (/ws) cannot work. "
+                         "Run: pip install 'uvicorn[standard]'")
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)

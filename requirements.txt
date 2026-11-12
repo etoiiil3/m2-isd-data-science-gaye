@@ -18,5 +18,5 @@ jiwer>=3.0
 # pip install https://github.com/kpu/kenlm/archive/master.zip
 # live demo (laptop)
 fastapi
-uvicorn
+uvicorn[standard]  # [standard] = the WebSocket library the demo's live recording needs
 sherpa-onnx

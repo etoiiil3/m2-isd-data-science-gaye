@@ -27,14 +27,17 @@ implement the scientific core of each stage (the `TODO(dX)` stubs), then benchma
 | Implement | `common/pareto.py::pareto_mask_array`; `speech/gmm_hmm.py::recognise_isolated`; `speech/ngram.py`: `NGramLM.fit`, `prob`, `perplexity` |
 | Acoustic model | Free Spoken Digit Dataset, MFCC + one GMM-HMM per word: ≥ 8 (states × mixtures) configurations, accuracy vs latency vs parameters; held-out speaker; degradations (white noise, babble, reverberation, telephone) — `python -m speech.run_classical_baseline --part isolated` |
 | Language model | perplexity vs order N = 1…5, training size and smoothing (add-k vs interpolation) on a digit grammar with 2nd-order structure — `--part lm`. Which N wins, and when? |
+| Try it live | `python -m asr_demo.server`: say one digit to `digits/0-dtw-baseline` (provided), then to `digits/1-gmm` and `digits/2-hmm` (your `recognise_isolated`) |
 
 **Afternoon: putting them together.**
 | | |
 |---|---|
-| Implement | `speech/gmm_hmm.py`: `WordLoopDecoder._build` (decoding graph with the LM), `decode_emissions` (Viterbi), `train_bigram` |
+| Implement | `speech/gmm_hmm.py`: `WordLoopDecoder._build` (decoding graph with the LM), `decode_emissions` (Viterbi; pass `delta` through the provided `self.prune` at every frame), `train_bigram` |
 | Benchmark | connected digits: acoustic-only vs bigram LM, LM weight sweep, insertion penalty tuned on a dev subset, matched vs mismatched LM domain, ≥ 3 SNRs — `--part connected` |
+| Benchmark | beam search: WER vs active states per frame for a score beam and a top-N beam (`WordLoopDecoder(beam=..., n_beam=...)`), clean and 15 dB — `--part beam`. Choose a beam width and justify it in `DECISIONS.md` |
 | Think | why does the decoding graph grow with N? (a trigram needs one copy of each word per previous word) |
-| Deliver `d1` | rows `gmm_isolated` (≥ 8), `ngram_lm` (≥ 8), `gmm_connected` (≥ 6); figures; ≥ 1 decision tagged d1 · `pytest -m d1` passes |
+| Try it live | say digit strings to `digits/3-word-loop` (your decoder) and `digits/4-word-loop+bigram` (+ your bigram); replay the same recording on both |
+| Deliver `d1` | rows `gmm_isolated` (≥ 8), `ngram_lm` (≥ 8), `gmm_connected` (≥ 6), `gmm_beam` (≥ 4); figures; ≥ 1 decision tagged d1 · `pytest -m d1` passes |
 
 ## Day 2 — neural recognition (17 November)
 **Morning: model zoo.**

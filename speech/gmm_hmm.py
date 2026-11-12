@@ -154,7 +154,8 @@ def recognise_isolated(wm: WordModels, feats: np.ndarray, vocab: list[str]) -> s
 # --------------------------------------------------------------------------- #
 class WordLoopDecoder:
     def __init__(self, wm: WordModels, vocab: list[str], bigram: dict | None = None,
-                 lm_weight: float = 1.0, word_penalty: float = 0.0, exit_logp: float = np.log(0.5)):
+                 lm_weight: float = 1.0, word_penalty: float = 0.0, exit_logp: float = np.log(0.5),
+                 beam: float = np.inf, n_beam: int | None = None):
         self.vocab = vocab
         self.wm = wm
         self.offsets, self.sizes = {}, {}
@@ -171,7 +172,28 @@ class WordLoopDecoder:
             bigram = {u: {v: 1.0 / V for v in vocab} for u in ["<s>"] + vocab}
         self.bigram = bigram
         self.lm_weight, self.word_penalty, self.exit_logp = lm_weight, word_penalty, exit_logp
+        self.beam, self.n_beam = beam, n_beam
+        self.finals = np.array([self.offsets[w] + self.sizes[w] - 1 for w in vocab])
+        self.n_active: list[int] = []  # filled by prune(): number of states kept at each frame
+        self.final_score = -np.inf  # filled by prune(): best word-final score at the last frame pruned
         self._build()
+
+    def prune(self, delta: np.ndarray) -> np.ndarray:
+        """Beam pruning (provided). Call it on delta at EVERY frame, right after computing it, and continue
+        with what it returns. Score beam: keep s iff delta[s] >= max(delta) - self.beam. Top-N beam: keep the
+        self.n_beam best states. Pruned states get -inf. With the defaults (beam=inf, n_beam=None) it changes
+        nothing, so exact Viterbi is the default. It also records the cost (self.n_active, one entry per frame)
+        and self.final_score, so that run_classical_baseline --part beam can measure search errors."""
+        if np.isfinite(self.beam):
+            delta = np.where(delta >= delta.max() - self.beam, delta, -np.inf)
+        if self.n_beam is not None and self.n_beam < len(delta):
+            keep = np.argpartition(-delta, self.n_beam - 1)[:self.n_beam]
+            kept = np.full_like(delta, -np.inf)
+            kept[keep] = delta[keep]
+            delta = kept
+        self.n_active.append(int(np.isfinite(delta).sum()))
+        self.final_score = float(delta[self.finals].max())
+        return delta
 
     def _lm(self, u, v):
         return self.lm_weight * np.log(max(self.bigram[u].get(v, 1e-12), 1e-12)) + self.word_penalty
@@ -188,8 +210,11 @@ class WordLoopDecoder:
         return self.decode_emissions(self.emissions(feats), drop)
 
     def decode_emissions(self, B: np.ndarray, drop: tuple = ("sil",)) -> list[str]:
-        """Viterbi on precomputed emissions (lets you sweep LM weights without recomputing GMMs)."""
-        raise NotImplementedError("TODO(d1): log-domain Viterbi over the composite HMM, end in a word-final state, backtrack, cut words at entry transitions, drop silence")
+        """Viterbi on precomputed emissions (lets you sweep LM weights without recomputing GMMs).
+        Pass delta through self.prune() at every frame (t = 0 included): the beam options then work, and the
+        default (no beam) is exact Viterbi. If every word-final state was pruned at the last frame, end in the
+        best surviving state instead."""
+        raise NotImplementedError("TODO(d1): log-domain Viterbi over the composite HMM (delta through self.prune at every frame), end in a word-final state, backtrack, cut words at entry transitions, drop silence")
 
 
 # --------------------------------------------------------------------------- #
@@ -197,4 +222,15 @@ class WordLoopDecoder:
 # --------------------------------------------------------------------------- #
 def train_bigram(sentences: list[list[str]], vocab: list[str], k: float = 0.1,
                  sil_token: str | None = "sil", p_sil: float = 0.15) -> dict:
+    """Add-k bigram LM over `vocab`, as nested dicts: lm[u][v] = P(v | u), every row sums to 1.
+
+    1. Counts: c(u, v) = k + #(u v) for u in ["<s>"] + vocab and v in vocab, with "<s>" before each
+       sentence (there is no end-of-sentence token). P(v | u) = c(u, v) / sum_v' c(u, v').
+    2. Only if sil_token is not None (the decoder's silence word):
+       - every row u (including "<s>") becomes (1 - p_sil) * P(v | u) for v in vocab, plus
+         lm[u][sil_token] = p_sil;
+       - a new row lm[sil_token]: P(v | sil) = (1 - 1e-6) * c(v) / sum_v' c(v') with
+         c(v) = sum_u c(u, v) (smoothed unigram: a silence forgets the history), and
+         P(sil | sil) = 1e-6.
+    """
     raise NotImplementedError("TODO(d1): add-k bigram P(v|u) with <s>; silence handled as documented; every row must sum to 1")
