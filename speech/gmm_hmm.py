@@ -338,6 +338,23 @@ def train_bigram(
     sil_token: str | None = "sil",
     p_sil: float = 0.15,
 ) -> dict:
-    raise NotImplementedError(
-        "TODO(d1): add-k bigram P(v|u) with <s>; silence handled as documented; every row must sum to 1"
-    )
+    """Add-k bigram P(v|u) over `vocab`, with the sentence-start history "<s>". """
+    counts = {u: {v: 0 for v in vocab} for u in ["<s>"] + vocab}
+    for sent in sentences:
+        prev = "<s>"
+        for w in sent:
+            counts[prev][w] += 1
+            prev = w
+
+    V = len(vocab)
+    p_words = 1.0 - p_sil if sil_token else 1.0
+    lm = {}
+    for u, row in counts.items():
+        total = sum(row.values()) + k * V
+        lm[u] = {v: p_words * (c + k) / total for v, c in row.items()}
+        if sil_token:
+            lm[u][sil_token] = p_sil
+    if sil_token:
+        lm[sil_token] = {v: 1.0 / V for v in vocab}
+        lm[sil_token][sil_token] = 0.0
+    return lm

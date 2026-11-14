@@ -102,9 +102,32 @@ Higher order does not automatically improve perplexity. For example, at 5,000 tr
 
 The run produced 30 `ngram_lm` rows tagged `cfg_milestone=d1` in `results/results.jsonl` and the full measurements in `results/speech_classical/ngram_perplexity.csv`.
 
+## Connected digits: acoustic model + bigram LM
+
+Setup: utterances of 3 to 7 digits are built by gluing FSDD recordings with short silences. The decoder is a word loop where each digit HMM (and a `sil` HMM) is connected to the others, and the transition from word u to word v gets `lm_weight * log P(v|u) + word_penalty`. The bigram is trained with add-k (k = 0.1) on 5,000 text sentences. In the "matched" test the digit sequences come from the same Markov chain as the LM text. In the "mismatched" test they are uniformly random. The insertion penalty is picked on 30 dev utterances for each setting, then the WER is measured on the other utterances. The run gives 72 `gmm_connected` rows tagged `cfg_milestone=d1`.
+
+Best WER per setting (lowest over LM weights):
+
+| SNR | Acoustic only | Matched LM | Mismatched LM |
+|---|---:|---:|---:|
+| Clean | 1.6% | 1.0% | 2.0% |
+| 20 dB | 14.8% | 8.2% | 9.2% |
+| 15 dB | 37.7% | 18.9% | 27.3% |
+| 10 dB | 56.5% | 35.1% | 44.3% |
+
+What we see:
+- On clean audio the acoustic model is already good, so the LM brings almost nothing.
+- The noisier the audio, the more the LM helps. At 15 dB the matched LM divides the WER by two.
+- A matched LM keeps improving up to weight 32-64. A mismatched LM has an optimum around 16, and at weight 64 it gets worse than acoustic-only (61% against 55% at 10 dB), because the LM pushes the decoder toward sequences that are not in the data.
+- Our results come from one random draw of utterances and one set of FSDD recordings, so small differences should not be over-interpreted.
+
+## Why does the decoding graph grow with N?
+
+In a bigram decoder the state we leave from tells us the previous word, so the graph only needs one copy of each word HMM. With a trigram we must know the two previous words, so we need one copy of each word for each previous word. With V words this gives about V copies for a bigram, V^2 for a trigram, and V^(N-1) for an N-gram, and every copy has its own HMM states. The Viterbi search then has to handle many more states, so it is slower and uses more memory. This is also why a higher order is not always worth it: the model is bigger and needs more data to estimate (see the n-gram sparsity results above).
+
 ## Limits and next measurements
 
 - The standard split allows speaker overlap. Run `--split unseen_speaker` to assess generalization to a voice absent from training.
 - Accuracy differences are based on one 300-recording test set and should be interpreted at that resolution.
 - The generated measurements contain mean `lat_ms`, but no latency tail percentile such as `lat_p90_ms`, which the submission specification asks for.
-- Generate the plot artifacts with `--part plot` after connected-digit results exist; the plotting command also reads the connected-digit CSV. Record any model choice and its rationale in the appropriate Day 1 decision entry in `DECISIONS.md`.
+- The plots are generated (`isolated_digits.png`, `connected_digits_lm.png`). The LM weight choice is recorded in `DECISIONS.md` (D1).
