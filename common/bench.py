@@ -1,4 +1,4 @@
-"""Model-agnostic benchmarking helpers shared by the vision and speech tracks.
+"""Model-agnostic benchmarking helpers (timing, memory, energy, result rows) used by every part of the project.
 
 Everything a Pareto point needs besides accuracy:
   * latency distribution (warm-up excluded, percentiles, not just the mean)
@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 import platform
-import resource
+import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
@@ -24,6 +24,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 import numpy as np
+
+try:
+    import resource  # Unix only: Windows has no such module
+except ImportError:
+    resource = None
 
 
 # --------------------------------------------------------------------------- #
@@ -152,8 +157,18 @@ def time_calls(fn: Callable[[Any], Any], inputs: list, warmup: int = 3) -> tuple
     return outs, lats
 
 
+def _peak_rss_mb() -> float:
+    """Peak resident memory of this process in MB, on Linux, macOS and Windows."""
+    if resource is not None:  # ru_maxrss is in kB on Linux but in bytes on macOS
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return rss / (2**20 if sys.platform == "darwin" else 1024.0)
+    import psutil  # Windows (a dependency of accelerate): peak working set
+    mi = psutil.Process().memory_info()
+    return getattr(mi, "peak_wset", mi.rss) / 2**20
+
+
 def peak_memory_mb() -> dict:
-    out = {"cpu_maxrss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0}
+    out = {"cpu_maxrss_mb": _peak_rss_mb()}
     torch = _torch()
     if torch is not None and torch.cuda.is_available():
         out["gpu_peak_mb"] = torch.cuda.max_memory_allocated() / 2**20
@@ -200,7 +215,7 @@ class BenchRecord:
 def log_record(rec: BenchRecord, path: str | Path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as f:
+    with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(rec.flat(), default=str) + "\n")
 
 

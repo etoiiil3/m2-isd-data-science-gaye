@@ -14,9 +14,14 @@ librosa
 soundfile
 hmmlearn>=0.3
 jiwer>=3.0
-# pip install --no-deps pyctcdecode   (its metadata would downgrade numpy)
-# pip install https://github.com/kpu/kenlm/archive/master.zip
+# Day 2, CTC + n-gram decoding: run these two AFTER `pip install -r requirements.txt`
+#   pip install --no-deps pyctcdecode==0.5.0   (--no-deps: its metadata says numpy<2 and would downgrade numpy)
+#   pip install kenlm                          (compiled from source: needs a C++ compiler, see README.md)
+pygtrie            # pyctcdecode's own dependencies, installed here because of --no-deps
+hypothesis
+# notebooks/ (workbench figures; VS Code works too, with ipykernel)
+jupyterlab
 # live demo (laptop)
 fastapi
-uvicorn
+uvicorn[standard]  # [standard] = the WebSocket library the demo's live recording needs
 sherpa-onnx

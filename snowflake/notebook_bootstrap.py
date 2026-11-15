@@ -2,24 +2,24 @@
 
     %run snowflake/notebook_bootstrap.py      (or copy-paste)
     fetch("fsdd")                              # @DATASETS/fsdd/ -> /tmp/data/fsdd/
-    push_results("results/vision_bench.jsonl", group="team3")
+    push_results("results/results.jsonl", group="team3")
 
 Notebook settings: compute pool DS_PROJECT_GPU_POOL, external access DS_PROJECT_PYPI_EAI +
-DS_PROJECT_HF_EAI (+ GITHUB for Ultralytics weights / kenlm).
+DS_PROJECT_HF_EAI (+ GITHUB for the reference streaming model; kenlm is built from its PyPI source).
 """
 import json
 import subprocess
 import sys
 from pathlib import Path
 
-PIP = ["jiwer", "hmmlearn", "librosa", "motmetrics", "pycocotools", "nvidia-ml-py", "ultralytics", "soundfile"]
+PIP = ["jiwer", "hmmlearn", "librosa", "nvidia-ml-py", "soundfile", "pygtrie", "hypothesis"]
 
 
 def install(extra=()):
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", *PIP, *extra], check=True)
     # pyctcdecode's metadata pins numpy<2 and would downgrade numpy: install it without deps
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps", "pyctcdecode"], check=True)
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "https://github.com/kpu/kenlm/archive/master.zip"], check=False)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps", "pyctcdecode==0.5.0"], check=True)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "kenlm"], check=False)
 
 
 def session():

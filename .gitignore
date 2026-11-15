@@ -1,5 +1,7 @@
 .venv/
 data/
+models/
 __pycache__/
 *.pyc
-models/
+.pytest_cache/
+.ipynb_checkpoints/

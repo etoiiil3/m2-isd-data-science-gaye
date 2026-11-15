@@ -5,9 +5,10 @@
     + n-gram LM   : beam search with KenLM, sweeping alpha (LM weight) and beta (word bonus)
                     -- the same two knobs as the GMM-HMM word-loop decoder of stage 1.
 
-Install:  pip install --no-deps pyctcdecode   (its metadata pins numpy<2 and would DOWNGRADE numpy,
-          breaking librosa/scipy; it works fine with numpy 2)
-          pip install https://github.com/kpu/kenlm/archive/master.zip
+Install:  uv sync --extra lm        (pyproject.toml ignores pyctcdecode's numpy<2 pin; kenlm is compiled: README.md)
+          or, with pip:  pip install -r requirements.txt && pip install --no-deps pyctcdecode==0.5.0 && pip install kenlm
+          (pyctcdecode's metadata pins numpy<2 and would DOWNGRADE numpy, breaking librosa/scipy; it works fine
+          with numpy 2, hence --no-deps)
 LM:       LibriSpeech n-gram ARPA files from https://www.openslr.org/11 (the pruned 3-gram is small),
           or write_arpa_bigram() below for a toy LM trained on any text.
 
@@ -65,7 +66,7 @@ def write_arpa_bigram(sentences: list[list[str]], path: Path, discount: float = 
     for (u, w), c in bi.items():
         p = max(c - discount, 0) / follow[u] + bo[u] * p_uni[w]
         lines_bi.append(f"{math.log10(p):.6f}\t{u} {w}")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:  # LF on Windows too: kenlm reads the ARPA
         f.write("\\data\\\n")
         f.write(f"ngram 1={len(p_uni) + 1}\nngram 2={len(lines_bi)}\n\n\\1-grams:\n")
         f.write(f"-99\t<s>\t{math.log10(bo['<s>']):.6f}\n")

@@ -46,9 +46,16 @@ let BACKENDS=[];
 async function loadBackends(){const cur=$("backend").value;const r=await fetch("/api/backends");BACKENDS=await r.json();
   $("backend").innerHTML=BACKENDS.map(b=>`<option value="${b.name}">${b.name}${b.loaded?" ✓":""}${b.error?" ✗":""} — ${b.description}</option>`).join("");
   if(cur)$("backend").value=cur;showSelected();}
-function showSelected(){const b=BACKENDS.find(x=>x.name===$("backend").value);if(b&&b.error)showError(b.error)}
-$("backend").onchange=showSelected;
-$("prompt").onclick=()=>{$("ref").value=PROMPTS[Math.floor(Math.random()*PROMPTS.length)]};
+function showSelected(){const b=BACKENDS.find(x=>x.name===$("backend").value);$("status").classList.remove("err");$("status").textContent="";if(b&&b.error)showError(b.error)}
+// Load the selected backend now: the first recording does not wait, and a missing TODO is reported at once.
+async function preload(){const b=BACKENDS.find(x=>x.name===$("backend").value);if(!b||b.loaded||b.error)return;
+  $("status").textContent=`loading ${b.name}… (first use: may train a model, up to ~30 s)`;
+  const r=await fetch("/api/load",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({backend:b.name})});
+  if($("backend").value!==b.name)return;await loadBackends();if(r.ok)$("status").textContent=`${b.name} ready`;}
+$("backend").onchange=()=>{showSelected();preload()};
+$("prompt").onclick=async()=>{const b=BACKENDS.find(x=>x.name===$("backend").value);
+  if(b&&b.has_prompt){const r=await fetch(`/api/prompt?backend=${encodeURIComponent(b.name)}`);const m=await r.json();if(m.text){$("ref").value=m.text;return}}
+  $("ref").value=PROMPTS[Math.floor(Math.random()*PROMPTS.length)]};
 // Resample to 16 kHz in the page: browsers capture at 44.1/48 kHz.
 function toChunks(f32){const ratio=srcRate/16000;carry=carry.concat(Array.from(f32));const out=[];const n=Math.floor(carry.length/ratio);
   for(let i=0;i<n;i++){const x=i*ratio,j=Math.floor(x),a=x-j;out.push(carry[j]*(1-a)+(carry[j+1]??carry[j])*a)}carry=carry.slice(Math.floor(n*ratio));return Float32Array.from(out)}
@@ -62,15 +69,15 @@ async function start(){if(recording)return;recording=true;$("status").classList.
     if(m.type==="partial"){$("status").textContent="";$("transcript").innerHTML=`<span class="partial">${m.text}</span>`}
     if(m.type==="final"){$("status").textContent="";show(m,"live");lastRec=m.recording;$("replay").disabled=false}
     if(m.type==="error"){if(recording)stop();showError(m.message)}};
-  ws.onclose=()=>{if(recording)stop()};
-  await new Promise(r=>ws.onopen=r);ws.send(JSON.stringify({type:"start",backend:$("backend").value,reference:$("ref").value}));
+  ws.onclose=()=>{if(recording)stop();if($("status").textContent==="decoding…")showError("the server closed the connection: see its terminal")};
+  if(!await new Promise(r=>{ws.onopen=()=>r(true);ws.onerror=()=>r(false)})){if(recording)stop();showError("cannot reach the server's /ws (is it running? see its terminal)");return}ws.send(JSON.stringify({type:"start",backend:$("backend").value,reference:$("ref").value}));
   try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1}})}catch(e){if(recording){stop();showError("microphone: "+e.message)}return}
   if(!recording){release();return}ctx=new AudioContext();srcRate=ctx.sampleRate;
   await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET],{type:"application/javascript"})));if(!recording){release();return}
   node=new AudioWorkletNode(ctx,"tap");node.port.onmessage=e=>pushAudio(e.data);ctx.createMediaStreamSource(stream).connect(node);}
 async function stop(){if(!recording)return;recording=false;$("rec").classList.remove("on");$("rec").textContent="● Record";
   if(pending.length&&ws&&ws.readyState===1)ws.send(Float32Array.from(pending.splice(0)).buffer);
-  release();if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"stop"}));$("status").textContent="decoding…";}
+  release();if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:"stop"}));$("status").textContent="decoding…"}}
 function show(m,mode){$("transcript").innerHTML=`<span class="final">${m.text||"(empty)"}</span>`;
   $("metrics").innerHTML=[["first partial (ms)",fmt(m.first_partial_ms)],["wait after release (ms)",fmt(m.final_latency_ms)],["real-time factor",fmt(m.rtf,3)],["audio (s)",fmt(m.audio_s,2)],["WER",m.wer===null?"–":fmt(m.wer,2)],["load (ms)",fmt(m.load_ms)]].map(([k,v])=>`<div><b>${v}</b><span>${k}</span></div>`).join("");
   hist.unshift({mode,...m});$("hist").innerHTML=hist.map(h=>`<tr><td>${h.mode}</td><td>${h.backend}</td><td>${fmt(h.audio_s,2)}</td><td>${fmt(h.first_partial_ms)}</td><td>${fmt(h.final_latency_ms)}</td><td>${fmt(h.rtf,3)}</td><td>${h.wer===null?"–":fmt(h.wer,2)}</td><td class="t">${h.text}</td></tr>`).join("");loadBackends();}
@@ -79,5 +86,5 @@ document.addEventListener("keydown",e=>{if(e.code==="Space"&&!e.repeat&&document
 document.addEventListener("keyup",e=>{if(e.code==="Space"&&document.activeElement.tagName!=="INPUT"){e.preventDefault();stop()}});
 $("replay").onclick=async()=>{$("status").classList.remove("err");$("status").textContent="replaying…";const r=await fetch("/api/replay",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recording:lastRec,backend:$("backend").value})});const m=await r.json();if(!r.ok){showError(m.detail);return}$("status").textContent="";show(m,"replay")};
 $("csv").onclick=()=>{const k=["mode","backend","recording","audio_s","first_partial_ms","final_latency_ms","rtf","wer","text"];const rows=[k.join(",")].concat(hist.map(h=>k.map(x=>JSON.stringify(h[x]??"")).join(",")));const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([rows.join("\n")],{type:"text/csv"}));a.download="asr_demo_history.csv";a.click()};
-loadBackends();
+loadBackends().then(preload);
 </script></body></html>

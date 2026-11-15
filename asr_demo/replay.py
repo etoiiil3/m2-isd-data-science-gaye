@@ -29,7 +29,7 @@ def main():
     a = ap.parse_args()
     refs = {}
     if a.trans:
-        for line in (a.wavs / a.trans).read_text().splitlines():
+        for line in (a.wavs / a.trans).read_text(encoding="utf-8").splitlines():
             k, _, t = line.partition(" ")
             refs[k] = t
     rows = []
@@ -41,7 +41,7 @@ def main():
             continue
         for w in sorted(a.wavs.glob("*.wav")):
             y, sr = sf.read(w, dtype="float32")
-            ref = refs.get(w.stem) or ((w.with_suffix(".txt")).read_text() if w.with_suffix(".txt").exists() else "")
+            ref = refs.get(w.stem) or ((w.with_suffix(".txt")).read_text(encoding="utf-8") if w.with_suffix(".txt").exists() else "")
             m = run_session_offline(b, y, sr, ref, a.realtime)
             m["recording"] = w.stem
             rows.append(m)

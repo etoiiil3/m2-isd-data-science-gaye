@@ -4,11 +4,12 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT / "src" if (_ROOT / "src").is_dir() else _ROOT))  # teacher repo: src/; bundles: root
 
 
 def pytest_configure(config):
-    for m in ("m1", "m2", "m3", "m4", "d1", "d2", "d3", "final", "stretch"):
+    for m in ("d1", "d2", "d3", "final", "stretch"):
         config.addinivalue_line("markers", f"{m}: milestone {m} contract")
 
 

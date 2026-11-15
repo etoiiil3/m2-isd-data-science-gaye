@@ -208,15 +208,9 @@ def recognise_isolated(wm: WordModels, feats: np.ndarray, vocab: list[str]) -> s
 # Because the source state identifies u, a bigram needs no state expansion.
 # --------------------------------------------------------------------------- #
 class WordLoopDecoder:
-    def __init__(
-        self,
-        wm: WordModels,
-        vocab: list[str],
-        bigram: dict | None = None,
-        lm_weight: float = 1.0,
-        word_penalty: float = 0.0,
-        exit_logp: float = np.log(0.5),
-    ):
+    def __init__(self, wm: WordModels, vocab: list[str], bigram: dict | None = None,
+                 lm_weight: float = 1.0, word_penalty: float = 0.0, exit_logp: float = np.log(0.5),
+                 beam: float = np.inf, n_beam: int | None = None):
         self.vocab = vocab
         self.wm = wm
         self.offsets, self.sizes = {}, {}
@@ -232,12 +226,29 @@ class WordLoopDecoder:
         if bigram is None:  # acoustic-only: uniform "LM"
             bigram = {u: {v: 1.0 / V for v in vocab} for u in ["<s>"] + vocab}
         self.bigram = bigram
-        self.lm_weight, self.word_penalty, self.exit_logp = (
-            lm_weight,
-            word_penalty,
-            exit_logp,
-        )
+        self.lm_weight, self.word_penalty, self.exit_logp = lm_weight, word_penalty, exit_logp
+        self.beam, self.n_beam = beam, n_beam
+        self.finals = np.array([self.offsets[w] + self.sizes[w] - 1 for w in vocab])
+        self.n_active: list[int] = []  # filled by prune(): number of states kept at each frame
+        self.final_score = -np.inf  # filled by prune(): best word-final score at the last frame pruned
         self._build()
+
+    def prune(self, delta: np.ndarray) -> np.ndarray:
+        """Beam pruning (provided). Call it on delta at EVERY frame, right after computing it, and continue
+        with what it returns. Score beam: keep s iff delta[s] >= max(delta) - self.beam. Top-N beam: keep the
+        self.n_beam best states. Pruned states get -inf. With the defaults (beam=inf, n_beam=None) it changes
+        nothing, so exact Viterbi is the default. It also records the cost (self.n_active, one entry per frame)
+        and self.final_score, so that run_classical_baseline --part beam can measure search errors."""
+        if np.isfinite(self.beam):
+            delta = np.where(delta >= delta.max() - self.beam, delta, -np.inf)
+        if self.n_beam is not None and self.n_beam < len(delta):
+            keep = np.argpartition(-delta, self.n_beam - 1)[:self.n_beam]
+            kept = np.full_like(delta, -np.inf)
+            kept[keep] = delta[keep]
+            delta = kept
+        self.n_active.append(int(np.isfinite(delta).sum()))
+        self.final_score = float(delta[self.finals].max())
+        return delta
 
     def _lm(self, u, v):
         return (

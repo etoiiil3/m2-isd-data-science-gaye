@@ -1,0 +1,63 @@
+# Environment of Project S, for uv (https://docs.astral.sh/uv/). The lock file uv.lock pins every package.
+#   uv sync                  # create .venv with Python 3.12 and install everything below (macOS, Linux, Windows)
+#   uv sync --extra lm       # day 2: also pyctcdecode + kenlm (kenlm is compiled; see README.md if it fails;
+#                            # --extra beam = pyctcdecode without kenlm, i.e. no n-gram LM)
+# pip users: requirements.txt does the same job (README.md, "Setup with pip").
+[project]
+name = "project-s-speech"
+version = "0.1.0"
+description = "M2 ISD 26-27, Data science, Project S: speech recognition under real-time constraints"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"   # the version the course was tested with; uv downloads it if you have another
+dependencies = [
+    "numpy>=2.0",
+    "scipy",
+    "pandas",
+    "matplotlib",
+    "scikit-learn",
+    "pyyaml",
+    "pytest",
+    "pillow",
+    "torch",                  # CPU wheels on Linux and Windows (see [tool.uv.sources]); macOS wheels are CPU/MPS
+    "transformers>=5.0",
+    "accelerate",
+    "nvidia-ml-py",           # GPU energy counter (imports everywhere, reports only with an NVIDIA GPU)
+    "librosa",
+    "soundfile",
+    "hmmlearn>=0.3",
+    "jiwer>=3.0",
+    "jupyterlab",             # notebooks/ (VS Code works too)
+    "fastapi",                # live demo
+    "uvicorn[standard]",      # [standard] = the WebSocket library the demo's live recording needs
+    "sherpa-onnx",
+]
+
+[project.optional-dependencies]
+# Day 2, CTC decoding (speech/ctc_lm.py). `beam`: pyctcdecode alone (greedy + beam search, no n-gram LM).
+# `lm`: beam + kenlm for the n-gram LM. kenlm has no wheels: it is built from source and needs a C++ compiler
+# (Xcode command line tools on macOS, build-essential on Linux, MSVC Build Tools on Windows; README.md).
+beam = [
+    "pyctcdecode==0.5.0",
+    "pygtrie",                # pyctcdecode's own dependencies, minus numpy (see override-dependencies)
+    "hypothesis",
+]
+lm = [
+    "project-s-speech[beam]",
+    "kenlm",
+]
+
+[tool.uv]
+package = false               # the code (common/, speech/, asr_demo/) runs from the repository root, it is not installed
+# pyctcdecode's metadata says numpy<2, which would downgrade numpy: ignore that bound (what `pip install
+# --no-deps pyctcdecode` achieves with pip). pyctcdecode 0.5.0 works with numpy 2 (tested: python -m speech.ctc_lm --selftest).
+override-dependencies = ["numpy>=2.0"]
+
+# torch from PyPI on Linux/Windows is the CUDA build (about 2.5 GB with its nvidia-* wheels). The course runs on CPU,
+# so take the small CPU wheels there. NVIDIA GPU owners: see README.md, "GPU".
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

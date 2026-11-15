@@ -16,7 +16,7 @@ def load_librispeech(root: Path, subset: str = "test-clean", n: int | None = 200
     import soundfile as sf
     items = []
     for trans in sorted((Path(root) / subset).glob("*/*/*.trans.txt")):
-        for line in trans.read_text().splitlines():
+        for line in trans.read_text(encoding="utf-8").splitlines():
             uid, text = line.split(" ", 1)
             items.append((trans.parent / f"{uid}.flac", text))
     rng = np.random.default_rng(seed)
