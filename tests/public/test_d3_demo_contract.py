@@ -5,7 +5,7 @@ import pytest
 from asr_demo.contract import OfflineBackend
 from asr_demo.metrics import run_session_offline
 
-pytestmark = [pytest.mark.d3, pytest.mark.stretch]
+pytestmark = pytest.mark.stretch  # not in `pytest -m d3`: the stretch is optional
 WORDS = [f"w{i}" for i in range(30)]
 
 

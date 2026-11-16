@@ -10,13 +10,14 @@ TEXTS = ["hello world", "the cat sat", "good morning"]
 
 class FakeASR:
     """Pretends to be a transformers ASR pipeline; utterance i is tagged by its first sample (i+1).
-    The 3rd utterance is transcribed wrongly."""
+    The 3rd utterance is transcribed wrongly. Like the real pipeline, it consumes (pops) the input dicts."""
     model = types.SimpleNamespace(parameters=lambda: [types.SimpleNamespace(numel=lambda: 10), types.SimpleNamespace(numel=lambda: 5)])
 
     def __call__(self, inputs, batch_size=1):
         out = []
         for x in inputs:
-            i = int(x["raw"][0]) - 1
+            i = int(x.pop("raw")[0]) - 1
+            x.pop("sampling_rate")
             out.append({"text": "WRONG WORDS" if i == 2 else TEXTS[i]})
         return out
 

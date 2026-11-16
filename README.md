@@ -81,13 +81,13 @@ python -m pip install kenlm                # compiler needed, see above (skip it
   on the legacy code page. Keep the repository path short and without spaces if you can (long paths break some tools).
 - **Environment variables** differ by shell. bash/zsh: `export DSP_MILESTONE=d1`; PowerShell:
   `$env:DSP_MILESTONE = "d1"`; cmd.exe: `set DSP_MILESTONE=d1`. Paths with `/` work in PowerShell too.
-- **Intel Macs:** current PyTorch no longer ships macOS Intel wheels, so `uv sync` cannot install torch there.
-  Use another machine of the group for the neural models, or Snowflake / Kaggle.
+- **Intel Macs:** current PyTorch, and numba (needed by librosa, hence by day 1 too), no longer ship macOS Intel
+  wheels, so `uv sync` fails there. Work on another machine of the group, or on Snowflake / Kaggle.
 - **NVIDIA GPU:** the lock file installs the small CPU build of torch. A GPU only speeds up the large models of
   day 2. To use it, pick your CUDA index on https://pytorch.org/get-started/locally/ and run
   `uv pip install --reinstall torch --index-url <that index>`, then use `uv run --no-sync ...` so that uv keeps it.
 - **Downloads** can be rerun: finished steps are skipped. `python scripts/fetch_data.py --only fsdd` fetches the
-  10 MB of day 1 alone (also `librispeech`, `lm`, `model`).
+  10 MB of day 1 alone (also `librispeech`, `lm`, `model`, and the optional 1.3 GB 4-gram `lm4`).
 - **`bash run_smoke.sh`** is a bash script. macOS and Linux: `uv run bash run_smoke.sh` (or activate the
   environment first). Windows: the same command in Git Bash (installed with Git for Windows) or WSL; or paste its
   lines into PowerShell one by one. Keep the lines of `run_smoke.sh` plain `python -m ...` commands, with no

@@ -42,6 +42,12 @@ def _torch():
         return None
 
 
+def default_device() -> str:
+    """'cuda' when torch sees a GPU, else 'cpu': the default of every --device option (a laptop has no CUDA)."""
+    torch = _torch()
+    return "cuda" if torch is not None and torch.cuda.is_available() else "cpu"
+
+
 def cuda_sync():
     torch = _torch()
     if torch is not None and torch.cuda.is_available():
@@ -204,7 +210,7 @@ class BenchRecord:
 
     def flat(self) -> dict:
         d = {"task": self.task, "model": self.model, "timestamp": self.timestamp}
-        # every row is tagged with the milestone it was produced for: `export DSP_MILESTONE=m2`
+        # every row is tagged with the milestone it was produced for: `export DSP_MILESTONE=d2`
         self.config.setdefault("milestone", os.environ.get("DSP_MILESTONE", "untagged"))
         d.update({f"cfg_{k}": v for k, v in self.config.items()})
         d.update(self.metrics)

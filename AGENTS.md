@@ -45,6 +45,8 @@ source .venv/bin/activate                      # macOS/Linux, or  uv run <comman
 pytest -m d1                                   # public tests of a day (d2, d3, stretch)
 export DSP_MILESTONE=d1                        # tag every result row with the current day (PowerShell: $env:DSP_MILESTONE = "d1")
 python -m speech.run_classical_baseline --fsdd data/fsdd/recordings --part isolated   # also: lm, connected, beam, plot
+python -m speech.asr_benchmark                 # day 2 model zoo (CPU by default without a GPU); --plot draws the fronts
+python -m speech.ctc_lm --arpa data/lm/3-gram.pruned.1e-7.arpa                        # day 2 CTC + n-gram, tuned on dev
 jupyter lab notebooks/d1_afternoon.ipynb       # see what the code does
 python -m asr_demo.server                      # live demo, http://localhost:8000
 bash run_smoke.sh                              # < 10 min end-to-end check; uv run bash run_smoke.sh; Windows: Git Bash/WSL

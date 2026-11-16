@@ -10,7 +10,7 @@ agree on it. Metrics:
   * falling behind: if compute per update > step_s, lag grows with time -> not real-time.
 
     python -m speech.streaming_sim --selftest            # mock recogniser, runs in seconds
-    python -m speech.streaming_sim --librispeech /data/LibriSpeech --model openai/whisper-base.en  # UNTESTED here
+    python -m speech.streaming_sim --model openai/whisper-base.en   # LibriSpeech (data/LibriSpeech), cuda if available
 Limitation (on purpose, for discussion): when the buffer exceeds max_buffer_s it is flushed and
 restarted, so a word cut at the boundary may be lost. whisper_streaming trims at timestamps instead.
 """
@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
+
+from common.bench import default_device
 
 
 def _common_prefix(a: list[str], b: list[str]) -> list[str]:
@@ -36,8 +38,24 @@ def _common_prefix(a: list[str], b: list[str]) -> list[str]:
 def simulate_streaming(audio: np.ndarray, sr: int, transcribe: Callable[[np.ndarray], str], step_s: float = 1.0,
                        n_agree: int = 2, max_buffer_s: float = 15.0,
                        cost_model: Callable[[float], float] | None = None) -> dict:
-    """cost_model(buffer_seconds) -> compute seconds, to simulate a model of a given speed;
-    if None, the real wall-clock time of `transcribe` is used."""
+    """Simulate streaming recognition of `audio` (sampled at `sr`) with an offline recogniser.
+
+    transcribe(buffer) -> text, where buffer = audio[buf_start * sr : t * sr] is the audio received since the last
+    flush. If transcribe has an attribute `wants_offset = True` (the mocks of the tests do), call it as
+    transcribe(buffer, buf_start) instead: buf_start, in seconds, is where the buffer starts in `audio`.
+    cost_model(buffer_seconds) -> compute seconds, to simulate a model of a given speed;
+    if None, the real wall-clock time of `transcribe` is used.
+    Words are text.lower().split(). Times are seconds from the start of the audio.
+
+    Returns a dict with exactly these keys:
+      text            the committed words joined by spaces;
+      words           the committed words (list of str), in order;
+      commit_times    np.ndarray, one commit time per committed word, non-decreasing;
+      updates         number of transcribe calls;
+      mean_compute_s  mean compute time per call (seconds);
+      behind          mean_compute_s > step_s (the model cannot keep up with real time);
+      finish_delay_s  time of the last commit minus the audio duration (>= 0).
+    """
     raise NotImplementedError("TODO(d3): real-time clock: re-transcribe the buffer every step_s or when the model is free; LocalAgreement-n commits (never retract); flush at max_buffer_s; return the documented dict")
 
 
@@ -102,11 +120,11 @@ def selftest():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--selftest", action="store_true")
-    ap.add_argument("--librispeech", type=Path)
+    ap.add_argument("--librispeech", type=Path, default=Path("data/LibriSpeech"))
     ap.add_argument("--model", default="openai/whisper-base.en")
     ap.add_argument("--steps", type=float, nargs="+", default=[0.5, 1.0, 2.0])
     ap.add_argument("--n", type=int, default=30)
-    ap.add_argument("--device", default="cuda")
+    ap.add_argument("--device", default=default_device())
     ap.add_argument("--out", type=Path, default=Path("results/streaming.csv"))
     ap.add_argument("--jsonl", type=Path, default=Path("results/results.jsonl"))
     args = ap.parse_args()
@@ -121,8 +139,14 @@ def main():
     rows = []
     for d in data:
         off = asr({"raw": d["audio"], "sampling_rate": d["sr"]}, return_timestamps="word")
-        ref_words = normalise(off["text"]).split()
-        ends = np.array([c["timestamp"][1] or 0.0 for c in off["chunks"]])[:len(ref_words)]
+        # word end times from the model's own timestamps; normalise each chunk, so that the words are tokenised
+        # exactly as the streamed text below ("well-known" -> "well known": two words, same end time)
+        ref_words, ends = [], []
+        for c in off["chunks"]:
+            for w in normalise(c["text"]).split():
+                ref_words.append(w)
+                ends.append(c["timestamp"][1] or 0.0)
+        ends = np.array(ends)
         for step in args.steps:
             r = simulate_streaming(d["audio"], d["sr"], lambda b: asr({"raw": b, "sampling_rate": d["sr"]})["text"]
                                    if len(b) > 1600 else "", step_s=step)
@@ -133,6 +157,7 @@ def main():
                              lag_p90=np.percentile(lags, 90) if len(lags) else None, behind=r["behind"]))
             print(rows[-1])
     df = pd.DataFrame(rows)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.out, index=False)
     from common.bench import BenchRecord, log_record
     for step, g in df.groupby("step_s"):

@@ -19,6 +19,9 @@ def load_librispeech(root: Path, subset: str = "test-clean", n: int | None = 200
         for line in trans.read_text(encoding="utf-8").splitlines():
             uid, text = line.split(" ", 1)
             items.append((trans.parent / f"{uid}.flac", text))
+    if not items:
+        raise FileNotFoundError(f"no LibriSpeech transcripts (*/*/*.trans.txt) under {Path(root) / subset}: "
+                                "run `python scripts/fetch_data.py --only librispeech`, or pass --librispeech")
     rng = np.random.default_rng(seed)
     rng.shuffle(items)
     out = []

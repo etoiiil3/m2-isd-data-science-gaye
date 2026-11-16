@@ -5,7 +5,7 @@ command works on macOS, Linux and Windows, and needs no wget, tar, gunzip or git
 
     python scripts/fetch_data.py                     # everything: data/ and models/ at the root of the repository
     python scripts/fetch_data.py D:\\asr_data         # another data folder (models/ stays at the repository root)
-    python scripts/fetch_data.py --only fsdd         # day 1 only (10 MB); also: librispeech, lm, model
+    python scripts/fetch_data.py --only fsdd         # day 1 only (10 MB); also: librispeech, lm, model, lm4
 
 What lands where (a step whose target exists is skipped, so the command can be rerun after a failure):
     fsdd          <DATA>/fsdd/recordings/*.wav              day 1, spoken digits (GitHub archive of the dataset)
@@ -13,6 +13,9 @@ What lands where (a step whose target exists is skipped, so the command can be r
     lm            <DATA>/lm/3-gram.pruned.1e-7.arpa         days 2-3, 3-gram LM, LOWER-CASED (wav2vec2 labels are
                                                             lower-cased in speech/ctc_lm.py), about 100 MB unpacked
     model         <MODELS>/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/    the demo's reference recogniser, ~130 MB
+    lm4           <DATA>/lm/4-gram.arpa                     OPTIONAL, only with --only lm4: day-2 stretch, 4-gram LM,
+                                                            lower-cased; 1.3 GB download, ~3 GB unpacked, several GB
+                                                            of RAM to load (a GPU machine, or a laptop with 16 GB)
 
 Each step is independent: a failed download only skips the steps that need it, and the exit status is 1.
 Downloads go to a temporary name and are renamed when complete, so an interrupted run never leaves a folder that
@@ -46,6 +49,8 @@ LM_URL = [f"{m}/11/3-gram.pruned.1e-7.arpa.gz" for m in _SLR]
 MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-20M-2023-02-17"
 MODEL_URL = [f"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{MODEL_NAME}.tar.bz2"]
 LM_FILE = "3-gram.pruned.1e-7.arpa"
+LM4_FILE = "4-gram.arpa"
+LM4_URL = [f"{m}/11/{LM4_FILE}.gz" for m in _SLR]
 
 
 # ------------------------------------------------------------------------------------------------ downloading
@@ -165,8 +170,8 @@ def fetch_librispeech(data: Path, models: Path) -> None:
         _move_into_place(tmp / "x/LibriSpeech/test-clean", final)
 
 
-def fetch_lm(data: Path, models: Path) -> None:
-    final = data / "lm" / LM_FILE
+def fetch_lm(data: Path, models: Path, urls: list[str] = LM_URL, name: str = LM_FILE) -> None:
+    final = data / "lm" / name
     if final.exists() and final.stat().st_size > 0:
         print("  already there, skipped")
         return
@@ -174,9 +179,9 @@ def fetch_lm(data: Path, models: Path) -> None:
     with tempfile.TemporaryDirectory(dir=data) as tmp:
         tmp = Path(tmp)
         gz = tmp / "lm.arpa.gz"
-        download(LM_URL, gz)
+        download(urls, gz)
         print("    unpacking and lower-casing ...", flush=True)
-        out = tmp / LM_FILE
+        out = tmp / name
         with gzip.open(gz, "rb") as src, open(out, "wb") as dst:
             while True:
                 chunk = src.read(1 << 22)
@@ -208,7 +213,10 @@ STEPS = {
     "model": ("Reference on-device streaming model (sherpa-onnx zipformer, 20M params, ~130 MB) -> models/", fetch_model),
     "librispeech": ("LibriSpeech test-clean (days 2-3, 346 MB)", fetch_librispeech),
     "lm": ("Pruned 3-gram LM, lower-cased (days 2-3, ~34 MB download)", fetch_lm),
+    "lm4": ("4-gram LM, lower-cased (optional day-2 stretch, 1.3 GB download)",
+            lambda data, models: fetch_lm(data, models, LM4_URL, LM4_FILE)),
 }
+DEFAULT_STEPS = ["fsdd", "model", "librispeech", "lm"]   # lm4 only on request
 
 
 def folder_size(p: Path) -> float:
@@ -219,12 +227,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("data", nargs="?", type=Path, default=Path("data"), help="data folder (default: data)")
     ap.add_argument("--models", type=Path, default=ROOT / "models", help="folder of the demo model (default: <repository>/models)")
-    ap.add_argument("--only", nargs="+", choices=list(STEPS), help="run only these steps (default: all)")
+    ap.add_argument("--only", nargs="+", choices=list(STEPS), help="run only these steps (default: all but lm4)")
     a = ap.parse_args()
     data, models = a.data.resolve(), a.models.resolve()
     data.mkdir(parents=True, exist_ok=True)
     failed = []
-    for key in a.only or STEPS:
+    for key in a.only or DEFAULT_STEPS:
         title, fn = STEPS[key]
         print(f"== {title}", flush=True)
         try:
