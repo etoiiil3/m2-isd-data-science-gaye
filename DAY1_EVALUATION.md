@@ -125,6 +125,25 @@ What we see:
 
 In a bigram decoder the state we leave from tells us the previous word, so the graph only needs one copy of each word HMM. With a trigram we must know the two previous words, so we need one copy of each word for each previous word. With V words this gives about V copies for a bigram, V^2 for a trigram, and V^(N-1) for an N-gram, and every copy has its own HMM states. The Viterbi search then has to handle many more states, so it is slower and uses more memory. This is also why a higher order is not always worth it: the model is bigger and needs more data to estimate (see the n-gram sparsity results above).
 
+## Beam pruning evaluation
+
+Beam pruning limits the decoder to promising HMM states at each audio frame. The **active states** column is the average number of states retained for the next frame. This reduces the search space in principle, while increasing the risk that the correct path is discarded. The experiment compared exact decoding with score-threshold beams and top-N state limits on 150 test utterances per condition (clean and 15 dB SNR); insertion penalties were tuned on a separate 30-utterance development set. Results are in `results/speech_classical/beam_search.csv` and the matching `gmm_beam` records in `results/results.jsonl`.
+
+| Condition and setting | WER | Active states/frame | Search errors | Viterbi time (ms/utterance) |
+|---|---:|---:|---:|---:|
+| Clean, exact | 0.82% | 82.0 | 0% | 3.68 |
+| Clean, score beam 250 | 0.82% | 19.8 | 0% | 4.02 |
+| Clean, score beam 225 | 0.82% | 16.0 | 5.8% | 4.01 |
+| Clean, top-N 32 | 0.82% | 31.9 | 0% | 4.45 |
+| 15 dB, exact | 16.97% | 82.0 | 0% | 3.68 |
+| 15 dB, score beam 400 | 16.97% | 65.8 | 0% | 4.01 |
+| 15 dB, score beam 350 | 16.97% | 55.3 | 0.8% | 4.06 |
+| 15 dB, top-N 48 | 16.97% | 47.7 | 2.5% | 4.41 |
+
+On clean audio, a score beam of 250 cuts the active-state count by about three quarters without changing WER or losing the exact best-scoring path. Tightening it to 225 retains even fewer states but begins to prune paths that exact decoding would choose. At 15 dB, the acoustic condition is harder, and the tested beams retain more states to keep WER near the exact baseline. Search errors indicate the percentage of utterances where pruning loses the exact decoder's best-scoring path; they do not directly indicate WER errors. For example, a pruned path can have a lower model score yet produce the same recognized digits.
+
+Every tested pruned setting took longer than exact decoding in this implementation, even when its active-state count was much lower. The key reason is when pruning happens: for each frame, `decode_emissions` first forms the dense transition-candidate matrix for all source and destination states and finds the best incoming transition for every destination. It then applies the beam or top-N pruning. States set to negative infinity by the previous frame still occupy entries in that dense calculation, so fewer retained states do not proportionally reduce the main matrix work. Pruning also adds score comparisons, top-N selection, and array handling. With a small active set, that extra work can be a larger share of the total, making the pruned run slower. To turn fewer active states into a speedup, decoding would need to expand transitions only from surviving states (or otherwise use a sparse transition structure) before doing the expensive scoring work.
+
 ## Limits and next measurements
 
 - The standard split allows speaker overlap. Run `--split unseen_speaker` to assess generalization to a voice absent from training.

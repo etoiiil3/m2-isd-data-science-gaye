@@ -262,7 +262,7 @@ class WordLoopDecoder:
         self.log_transmat = np.full((self.S, self.S), -np.inf, dtype=np.float64)
         self.entry_transitions = np.zeros((self.S, self.S), dtype=bool)
         self.start_logprob = np.full(self.S, -np.inf, dtype=np.float64)
-        self.final_states = np.empty(len(self.vocab), dtype=int)
+        self.finals = np.empty(len(self.vocab), dtype=int)
 
         for wi, word in enumerate(self.vocab):
             model = self.wm.models[word]
@@ -273,7 +273,7 @@ class WordLoopDecoder:
             # Keep the learned left-to-right transitions inside this word.
             with np.errstate(divide="ignore"):
                 self.log_transmat[offset:stop, offset:stop] = np.log(model.transmat_)
-            self.final_states[wi] = stop - 1
+            self.finals[wi] = stop - 1
 
             # The utterance may begin with any vocabulary word. Its start
             # probability comes from the LM history token <s>.
@@ -300,10 +300,16 @@ class WordLoopDecoder:
         return self.decode_emissions(self.emissions(feats), drop)
 
     def decode_emissions(self, B: np.ndarray, drop: tuple = ("sil",)) -> list[str]:
-        """Viterbi on precomputed emissions (lets you sweep LM weights without recomputing GMMs)."""
+        """Viterbi on precomputed emissions (lets you sweep LM weights without recomputing GMMs).
+        Pass delta through self.prune() at every frame (t = 0 included): the beam options then work, and the
+        default (no beam) is exact Viterbi. If every word-final state was pruned at the last frame, end in the
+        best surviving state instead. B has shape (frames, combined states); the result is a word sequence."""
         B = np.asarray(B, dtype=np.float64)
         if B.ndim != 2 or B.shape[1] != self.S:
             raise ValueError(f"B must have shape (T, {self.S}); got {B.shape}")
+        # final_score is updated by prune() at each frame. Keep n_active
+        # cumulative so benchmark loops can aggregate several utterances.
+        self.final_score = -np.inf
         if B.shape[0] == 0:
             return []
 
@@ -312,18 +318,23 @@ class WordLoopDecoder:
         T = B.shape[0]
         best = np.full((T, self.S), -np.inf, dtype=np.float64)
         back = np.full((T, self.S), -1, dtype=np.int64)
-        best[0] = self.start_logprob + B[0]
+        best[0] = self.prune(self.start_logprob + B[0])
 
         for t in range(1, T):
             candidates = best[t - 1, :, None] + self.log_transmat
             back[t] = np.argmax(candidates, axis=0)
-            best[t] = candidates[back[t], np.arange(self.S)] + B[t]
+            delta = candidates[back[t], np.arange(self.S)] + B[t]
+            best[t] = self.prune(delta)
 
-        # Only accept a completed word at the end of the utterance.
-        end_scores = best[-1, self.final_states]
-        if not np.isfinite(end_scores).any():
+        # Prefer a completed word. If pruning removed every final state, use
+        # the best remaining state as the beam-search approximation.
+        end_scores = best[-1, self.finals]
+        if np.isfinite(end_scores).any():
+            state = int(self.finals[np.argmax(end_scores)])
+        elif np.isfinite(best[-1]).any():
+            state = int(np.argmax(best[-1]))
+        else:
             raise ValueError("no valid word path for these emissions")
-        state = int(self.final_states[np.argmax(end_scores)])
 
         path = np.empty(T, dtype=np.int64)
         path[-1] = state
@@ -349,8 +360,22 @@ def train_bigram(
     sil_token: str | None = "sil",
     p_sil: float = 0.15,
 ) -> dict:
-    """Add-k bigram P(v|u) over `vocab`, with the sentence-start history "<s>". """
-    counts = {u: {v: 0 for v in vocab} for u in ["<s>"] + vocab}
+    """Add-k bigram LM over `vocab`, as nested dicts: lm[u][v] = P(v | u), every row sums to 1.
+
+    1. Counts: c(u, v) = k + #(u v) for u in ["<s>"] + vocab and v in vocab, with "<s>" before each
+       sentence (there is no end-of-sentence token). P(v | u) = c(u, v) / sum_v' c(u, v').
+    2. Only if sil_token is not None (the decoder's silence word):
+       - every row u (including "<s>") becomes (1 - p_sil) * P(v | u) for v in vocab, plus
+         lm[u][sil_token] = p_sil;
+       - a new row lm[sil_token]: P(v | sil) = (1 - 1e-6) * c(v) / sum_v' c(v') with
+         c(v) = sum_u c(u, v) (smoothed unigram: a silence forgets the history), and
+         P(sil | sil) = 1e-6.
+    """
+    if sil_token is not None and sil_token in vocab:
+        raise ValueError("sil_token must be separate from vocab")
+
+    contexts = ["<s>"] + list(vocab)
+    counts = {u: {v: 0 for v in vocab} for u in contexts}
     for sent in sentences:
         prev = "<s>"
         for w in sent:
@@ -358,14 +383,37 @@ def train_bigram(
             prev = w
 
     V = len(vocab)
-    p_words = 1.0 - p_sil if sil_token else 1.0
     lm = {}
-    for u, row in counts.items():
-        total = sum(row.values()) + k * V
-        lm[u] = {v: p_words * (c + k) / total for v, c in row.items()}
-        if sil_token:
+    smoothed = {
+        u: {v: count + k for v, count in row.items()}
+        for u, row in counts.items()
+    }
+
+    for u, row in smoothed.items():
+        total = sum(row.values())
+        if total == 0:
+            probs = {v: 1.0 / V for v in vocab}
+        else:
+            probs = {v: count / total for v, count in row.items()}
+        if sil_token is not None:
+            lm[u] = {v: (1.0 - p_sil) * p for v, p in probs.items()}
             lm[u][sil_token] = p_sil
-    if sil_token:
-        lm[sil_token] = {v: 1.0 / V for v in vocab}
-        lm[sil_token][sil_token] = 0.0
+        else:
+            lm[u] = probs
+
+    if sil_token is not None:
+        unigram = {
+            v: sum(smoothed[u][v] for u in contexts)
+            for v in vocab
+        }
+        total_unigram = sum(unigram.values())
+        if total_unigram == 0:
+            unigram_probs = {v: 1.0 / V for v in vocab}
+        else:
+            unigram_probs = {
+                v: (1.0 - 1e-6) * count / total_unigram
+                for v, count in unigram.items()
+            }
+        unigram_probs[sil_token] = 1e-6
+        lm[sil_token] = unigram_probs
     return lm
