@@ -35,6 +35,14 @@ implement the scientific core of each stage (the `TODO(dX)` stubs), then benchma
 | See it | `notebooks/d1_morning.ipynb`: MFCC step by step, EM on a GMM, a word HMM's state path, then your recogniser, your Pareto front and your n-grams as figures (no code to write in the notebook) |
 | Try it live | `python -m asr_demo.server`: say one digit to `digits/0-dtw-baseline` (provided), then to `digits/1-gmm` and `digits/2-hmm` (your `recognise_isolated`) |
 
+Each lab is planned for 2 h of work, which leaves time to get stuck and ask: the header of its notebook gives the
+timeline. Each day-1 function is one `TODO(d1)` stub for its whole body; from day 2, the functions to implement
+are written except a few lines, each marked by a `TODO(dX)` that says what goes there. **Since 17 November the
+day-1 reference solution is on branch `solutions` of the starter repository, never on `main`**, so pulling `main`
+never replaces your code. Compare it with your own, or take a function you need (`git fetch course`, then `git diff HEAD course/solutions -- speech/gmm_hmm.py` to compare, or `git checkout course/solutions -- speech/gmm_hmm.py` to take one file; use
+`origin` instead of `course` if that is your name for the starter repository). Your `d1` tag and rows stay as
+delivered.
+
 **Afternoon: putting them together.**
 | | |
 |---|---|
@@ -52,6 +60,7 @@ implement the scientific core of each stage (the `TODO(dX)` stubs), then benchma
 |---|---|
 | Implement | `speech/asr_benchmark.py::bench_model` |
 | Benchmark | ≥ 6 configurations from ≥ 3 families (Whisper sizes, distilled Whisper, wav2vec2 CTC, Moonshine, …) on the **same** 200 LibriSpeech test-clean utterances; batch 1 (latency) vs batch 16 (throughput); with a GPU (optional: Kaggle, Snowflake), CPU vs GPU and fp16/fp32 for ≥ 1 model |
+| See it | `notebooks/d2_morning.ipynb`: wav2vec2's frames and labels, Whisper and the normaliser, your `bench_model` on 16 utterances, batch 1 vs 8 |
 | Run | `python -m speech.asr_benchmark`: 3 small models (Whisper tiny.en, wav2vec2-base, Moonshine tiny) × batch 1 and 16, about 11 min on a laptop CPU; then add models, e.g. `--models openai/whisper-base.en --n 50` (larger Whisper models need about 1-2 s per utterance on CPU). `--plot` draws the fronts into `results/figures/` |
 
 **Afternoon: adding language information.**
@@ -59,6 +68,7 @@ implement the scientific core of each stage (the `TODO(dX)` stubs), then benchma
 |---|---|
 | Implement | `speech/ctc_lm.py`: `greedy_ctc`, `sweep` |
 | Benchmark | a CTC model: greedy vs beam vs beam + n-gram (3-gram, and 4-gram if time) — sweep alpha (LM weight), beta (word bonus), beam; WER vs decoding time. Explicit LM (CTC + n-gram) vs implicit LM (Whisper's decoder): what does each cost? |
+| See it | `notebooks/d2_afternoon.ipynb`: your greedy output and its non-words, L4's toy prefix beam search, the LM's two knobs on one utterance, your sweep on 20 dev / 20 test utterances |
 | Run | `python -m speech.ctc_lm --arpa data/lm/3-gram.pruned.1e-7.arpa`, about 2 min on a laptop CPU: the grid is swept on 100 dev utterances, the best point decoded once on the other 100 (rows tagged `cfg_split`). 4-gram (optional, 1.3 GB): `python scripts/fetch_data.py --only lm4`, then `--arpa data/lm/4-gram.arpa` |
 | Deliver `d2` | rows `asr` (≥ 6) and `ctc_decoding` (≥ 6); fronts; ≥ 1 decision tagged d2 · `pytest -m d2` passes |
 
