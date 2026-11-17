@@ -19,6 +19,7 @@ Protocol of main: logits of the 200 utterances computed once; alpha x beta x bea
 the best point is decoded once on the other half (test). Rows go to results/results.jsonl (task "ctc_decoding",
 cfg_split dev or test). Defaults: --librispeech data/LibriSpeech, --device cuda if available else cpu.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -34,7 +35,11 @@ from common.bench import default_device
 
 # --------------------------------------------------------------------------- #
 def greedy_ctc(logprobs: np.ndarray, labels: list[str], blank: int = 0) -> str:
-    raise NotImplementedError("TODO(d2): argmax per frame, collapse repeats, drop blanks, '|' = space")
+    arg_max = logprobs.argmax(axis=-1)
+    # Collapse consecutive repeats before removing blanks (A, blank, A -> AA).
+    arg_max = arg_max[np.r_[True, arg_max[1:] != arg_max[:-1]]]
+    arg_max = arg_max[arg_max != blank]
+    return "".join(labels[i] for i in arg_max).replace("|", " ").strip()  # '|' = space
 
 
 def labels_from_processor(processor) -> tuple[list[str], int]:
@@ -44,7 +49,10 @@ def labels_from_processor(processor) -> tuple[list[str], int]:
     for tok, i in vocab.items():
         labels[i] = tok
     blank = processor.tokenizer.pad_token_id
-    labels = ["" if i == blank else (" " if t == "|" else t.lower()) for i, t in enumerate(labels)]
+    labels = [
+        "" if i == blank else (" " if t == "|" else t.lower())
+        for i, t in enumerate(labels)
+    ]
     return labels, blank
 
 
@@ -58,7 +66,10 @@ def write_arpa_bigram(sentences: list[list[str]], path: Path, discount: float = 
     total = sum(v for k, v in uni.items() if k != "<s>")
     p_uni = {w: c / total for w, c in uni.items() if w != "<s>"}
     p_uni["<unk>"] = 1e-6
-    follow, n_types = Counter(), Counter()  # total successor tokens / distinct successor types
+    follow, n_types = (
+        Counter(),
+        Counter(),
+    )  # total successor tokens / distinct successor types
     for (u, _), c in bi.items():
         follow[u] += c
         n_types[u] += 1
@@ -71,7 +82,9 @@ def write_arpa_bigram(sentences: list[list[str]], path: Path, discount: float = 
     for (u, w), c in bi.items():
         p = max(c - discount, 0) / follow[u] + bo[u] * p_uni[w]
         lines_bi.append(f"{math.log10(p):.6f}\t{u} {w}")
-    with open(path, "w", encoding="utf-8", newline="\n") as f:  # LF on Windows too: kenlm reads the ARPA
+    with open(
+        path, "w", encoding="utf-8", newline="\n"
+    ) as f:  # LF on Windows too: kenlm reads the ARPA
         f.write("\\data\\\n")
         f.write(f"ngram 1={len(p_uni) + 1}\nngram 2={len(lines_bi)}\n\n\\1-grams:\n")
         f.write(f"-99\t<s>\t{math.log10(bo['<s>']):.6f}\n")
@@ -83,10 +96,13 @@ def write_arpa_bigram(sentences: list[list[str]], path: Path, discount: float = 
 
 def make_decoder(labels, arpa: str | None, alpha: float, beta: float):
     from pyctcdecode import build_ctcdecoder
+
     return build_ctcdecoder(labels, kenlm_model_path=arpa, alpha=alpha, beta=beta)
 
 
-def sweep(logprobs_list, refs, labels, blank, arpa, alphas, betas, beams, unigrams=None):
+def sweep(
+    logprobs_list, refs, labels, blank, arpa, alphas, betas, beams, unigrams=None
+):
     """Decode every utterance with each decoder; one row (a dict) per decoder configuration, in this order:
       - decoder="greedy (acoustic only)", alpha=0, beta=0, beam=1;
       - decoder="beam, no LM", alpha=0, beta=0, for each beam in beams;
@@ -94,13 +110,18 @@ def sweep(logprobs_list, refs, labels, blank, arpa, alphas, betas, beams, unigra
     Keys: decoder, alpha, beta, beam, wer (jiwer.wer over all utterances; an empty hypothesis counts as "<e>"),
     ms_per_utt (decoding time per utterance). The decoder names are used by the tests and the plots: keep them.
     unigrams: unused (kept for compatibility)."""
-    raise NotImplementedError("TODO(d2): rows for greedy, beam without LM (each beam width) and beam + KenLM (alpha x beta x beam): WER and ms per utterance")
+    raise NotImplementedError(
+        "TODO(d2): rows for greedy, beam without LM (each beam width) and beam + KenLM (alpha x beta x beam): WER and ms per utterance"
+    )
 
 
 # --------------------------------------------------------------------------- #
-def synthetic_posteriors(text: str, labels: list[str], rng, p_ok: float = 0.6, sharp: float = 3.0):
+def synthetic_posteriors(
+    text: str, labels: list[str], rng, p_ok: float = 0.6, sharp: float = 3.0
+):
     """Fake CTC output: each char held 2-4 frames, blanks in between; with prob 1-p_ok the char's
-    frames favour a random wrong char. Lets students test decoders without any acoustic model."""
+    frames favour a random wrong char. Lets students test decoders without any acoustic model.
+    """
     idx = {c: i for i, c in enumerate(labels)}
     seq = []
     for c in text:
@@ -116,21 +137,34 @@ def synthetic_posteriors(text: str, labels: list[str], rng, p_ok: float = 0.6, s
     for k, alt in seq:
         z = rng.normal(0, 1, V)
         z[alt] += sharp
-        z[k] += sharp * (0.85 if alt != k else 1.0)  # the right char is still close -> LM can recover it
+        z[k] += sharp * (
+            0.85 if alt != k else 1.0
+        )  # the right char is still close -> LM can recover it
         lp.append(z - np.logaddexp.reduce(z))
     return np.array(lp, dtype=np.float32)
 
 
 def selftest(out: Path):
     import pandas as pd
+
     rng = np.random.default_rng(0)
-    vocab = ("the cat dog bird sat ran flew on under over a red big small mat tree house roof "
-             "garden near in").split()
+    vocab = (
+        "the cat dog bird sat ran flew on under over a red big small mat tree house roof "
+        "garden near in"
+    ).split()
     nouns = ["cat", "dog", "bird", "mat", "tree", "house", "roof", "garden"]
+
     def sent():  # noqa: E306
-        return ["the", rng.choice(["red", "big", "small"]), rng.choice(nouns[:3]),
-                rng.choice(["sat", "ran", "flew"]), rng.choice(["on", "under", "over", "near", "in"]),
-                "the", rng.choice(nouns[3:])]
+        return [
+            "the",
+            rng.choice(["red", "big", "small"]),
+            rng.choice(nouns[:3]),
+            rng.choice(["sat", "ran", "flew"]),
+            rng.choice(["on", "under", "over", "near", "in"]),
+            "the",
+            rng.choice(nouns[3:]),
+        ]
+
     corpus = [[str(w) for w in sent()] for _ in range(3000)]
     out.mkdir(parents=True, exist_ok=True)
     arpa = out / "toy_bigram.arpa"
@@ -140,12 +174,25 @@ def selftest(out: Path):
     rows = []
     for p_ok in (0.9, 0.75, 0.6):
         lps = [synthetic_posteriors(t, labels, rng, p_ok) for t in tests]
-        for r in sweep(lps, tests, labels, 0, str(arpa), alphas=[0.5, 1.0, 2.0], betas=[0.0, 1.5], beams=[1, 10, 50]):
+        for r in sweep(
+            lps,
+            tests,
+            labels,
+            0,
+            str(arpa),
+            alphas=[0.5, 1.0, 2.0],
+            betas=[0.0, 1.5],
+            beams=[1, 10, 50],
+        ):
             rows.append(dict(char_acc_sim=p_ok, **r))
     df = pd.DataFrame(rows)
     df.to_csv(out / "ctc_lm_selftest.csv", index=False)
     best = df.loc[df.groupby(["char_acc_sim", "decoder"]).wer.idxmin()]
-    print(best[["char_acc_sim", "decoder", "alpha", "beta", "beam", "wer", "ms_per_utt"]].round(3).to_string(index=False))
+    print(
+        best[["char_acc_sim", "decoder", "alpha", "beta", "beam", "wer", "ms_per_utt"]]
+        .round(3)
+        .to_string(index=False)
+    )
     return df
 
 
@@ -154,13 +201,16 @@ def librispeech_logits(root, model_id, n, device):
     import torch
     from transformers import AutoProcessor, Wav2Vec2ForCTC
     from speech.data import load_librispeech
+
     proc = AutoProcessor.from_pretrained(model_id)
     model = Wav2Vec2ForCTC.from_pretrained(model_id).to(device).eval()
     data = load_librispeech(root, n=n)
     lps = []
     with torch.inference_mode():
         for d in data:
-            x = proc(d["audio"], sampling_rate=d["sr"], return_tensors="pt").input_values.to(device)
+            x = proc(
+                d["audio"], sampling_rate=d["sr"], return_tensors="pt"
+            ).input_values.to(device)
             lps.append(torch.log_softmax(model(x).logits[0].float(), -1).cpu().numpy())
     labels, blank = labels_from_processor(proc)
     return lps, [d["text"].lower() for d in data], labels, blank
@@ -181,23 +231,63 @@ def main():
         return selftest(args.out)
     import pandas as pd
     from common.bench import BenchRecord, log_record
-    lps, refs, labels, blank = librispeech_logits(args.librispeech, args.model, args.n, args.device)
-    half = len(refs) // 2  # the utterances are already shuffled (load_librispeech): dev = first half, test = the rest
-    dev = sweep(lps[:half], refs[:half], labels, blank, args.arpa, alphas=[0.3, 0.5, 1.0, 2.0], betas=[0.0, 1.0, 2.0],
-                beams=[10, 50, 100])
-    best = min((r for r in dev if r["decoder"] != "greedy (acoustic only)"), key=lambda r: r["wer"])
+
+    lps, refs, labels, blank = librispeech_logits(
+        args.librispeech, args.model, args.n, args.device
+    )
+    half = (
+        len(refs) // 2
+    )  # the utterances are already shuffled (load_librispeech): dev = first half, test = the rest
+    dev = sweep(
+        lps[:half],
+        refs[:half],
+        labels,
+        blank,
+        args.arpa,
+        alphas=[0.3, 0.5, 1.0, 2.0],
+        betas=[0.0, 1.0, 2.0],
+        beams=[10, 50, 100],
+    )
+    best = min(
+        (r for r in dev if r["decoder"] != "greedy (acoustic only)"),
+        key=lambda r: r["wer"],
+    )
     print(f"best on dev ({half} utterances): {best}")
-    test = sweep(lps[half:], refs[half:], labels, blank, args.arpa if best["decoder"] == "beam + n-gram" else None,
-                 alphas=[best["alpha"]], betas=[best["beta"]], beams=[best["beam"]])
-    rows = [dict(split="dev", **r) for r in dev] + [dict(split="test", **r) for r in test]
-    print(pd.DataFrame(rows[-len(test):]).round(4).to_string(index=False))
+    test = sweep(
+        lps[half:],
+        refs[half:],
+        labels,
+        blank,
+        args.arpa if best["decoder"] == "beam + n-gram" else None,
+        alphas=[best["alpha"]],
+        betas=[best["beta"]],
+        beams=[best["beam"]],
+    )
+    rows = [dict(split="dev", **r) for r in dev] + [
+        dict(split="test", **r) for r in test
+    ]
+    print(pd.DataFrame(rows[-len(test) :]).round(4).to_string(index=False))
     args.out.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(args.out / f"ctc_lm_{args.model.split('/')[-1]}.csv", index=False)
+    pd.DataFrame(rows).to_csv(
+        args.out / f"ctc_lm_{args.model.split('/')[-1]}.csv", index=False
+    )
     for r in rows:
-        log_record(BenchRecord("ctc_decoding", f"{args.model}|{r['decoder']}",
-                               dict(alpha=r["alpha"], beta=r["beta"], beam=r["beam"], split=r["split"],
-                                    n=half if r["split"] == "dev" else len(refs) - half, device=args.device),
-                               dict(wer=r["wer"], ms_per_utt=r["ms_per_utt"])), args.jsonl)
+        log_record(
+            BenchRecord(
+                "ctc_decoding",
+                f"{args.model}|{r['decoder']}",
+                dict(
+                    alpha=r["alpha"],
+                    beta=r["beta"],
+                    beam=r["beam"],
+                    split=r["split"],
+                    n=half if r["split"] == "dev" else len(refs) - half,
+                    device=args.device,
+                ),
+                dict(wer=r["wer"], ms_per_utt=r["ms_per_utt"]),
+            ),
+            args.jsonl,
+        )
 
 
 if __name__ == "__main__":
