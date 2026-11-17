@@ -19,3 +19,10 @@ exam asks you to defend them, including the alternatives you rejected.
 - Decision: use score beam width **400** when preserving the exact-search result across these tested conditions is the priority. This is a quality-preserving pruning setting, not a measured speed optimization: the current dense decoder is slower with pruning than exact search.
 - Would change our mind if: a sparse/active-state decoder makes pruning faster, or measurements on more speakers and noise conditions show a narrower beam preserves WER and exact-search paths reliably.
 
+## D3 — ASR model for the push-to-talk assistant on a laptop CPU   (milestone: d2)
+- Question: which pretrained model to deploy on the laptop CPU for push-to-talk (latency), and which for offline transcription (throughput)?
+- Alternatives: whisper-tiny.en, whisper-base.en, wav2vec2-base-960h (CTC), moonshine-tiny; batch 1 vs batch 16.
+- Protocol: same 200 LibriSpeech test-clean utterances (22.5 min) for tiny/wav2vec2/moonshine, 50 for whisper-base.en (slower); laptop CPU (x86_64, 16 cores), fp32, provided normaliser.
+- Evidence: rows task=asr, cfg_milestone=d2 in results/results.jsonl; results/figures/asr_pareto.png. Batch 1: wav2vec2 WER 3.3%, RTF 0.043, p90 553 ms; moonshine 3.6%, RTF 0.077, p90 1050 ms; whisper-tiny 5.0%, RTF 0.141, p90 1514 ms; whisper-base 3.1% (50 utt.), RTF 0.224, p90 2248 ms. Batch 16 is slower than batch 1 for every model on CPU (padding), and wav2vec2 degrades to 24.5% WER when batched.
+- Decision: wav2vec2-base-960h at batch 1 for push-to-talk: best RTF and tail latency, and the best WER on the shared 200 utterances. Offline on this CPU: batch 1 as well; batching only pays off on a GPU.
+- Would change our mind if: CTC without a language model makes too many spelling errors (afternoon), a stronger normaliser closes the gap for Whisper, whisper-base keeps its lower WER on all 200 utterances, or the demo machine has a GPU.
