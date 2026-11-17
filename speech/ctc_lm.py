@@ -110,9 +110,32 @@ def sweep(
     Keys: decoder, alpha, beta, beam, wer (jiwer.wer over all utterances; an empty hypothesis counts as "<e>"),
     ms_per_utt (decoding time per utterance). The decoder names are used by the tests and the plots: keep them.
     unigrams: unused (kept for compatibility)."""
-    raise NotImplementedError(
-        "TODO(d2): rows for greedy, beam without LM (each beam width) and beam + KenLM (alpha x beta x beam): WER and ms per utterance"
-    )
+    import jiwer
+
+    def run(name, alpha, beta, beam, decode):
+        t0 = time.perf_counter()
+        hyps = [decode(lp) or "<e>" for lp in logprobs_list]
+        ms = 1000 * (time.perf_counter() - t0) / len(logprobs_list)
+        wer = jiwer.wer(list(refs), hyps)
+        return dict(decoder=name, alpha=alpha, beta=beta, beam=beam, wer=wer, ms_per_utt=ms)
+
+    rows = [
+        run("greedy (acoustic only)", 0, 0, 1, lambda lp: greedy_ctc(lp, labels, blank))
+    ]
+    plain = make_decoder(labels, None, 0.0, 0.0)
+    for b in beams:
+        rows.append(
+            run("beam, no LM", 0, 0, b, lambda lp: plain.decode(lp, beam_width=b).strip())
+        )
+    if arpa:
+        for a in alphas:
+            for be in betas:
+                lm = make_decoder(labels, arpa, a, be)
+                for b in beams:
+                    rows.append(
+                        run("beam + n-gram", a, be, b, lambda lp: lm.decode(lp, beam_width=b).strip())
+                    )
+    return rows
 
 
 # --------------------------------------------------------------------------- #
