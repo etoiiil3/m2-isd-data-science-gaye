@@ -23,3 +23,32 @@ LibriSpeech test-clean, 200 utterances (22.5 min of audio); whisper-base.en on t
 
 ## Figure
 `results/figures/asr_pareto.png` (WER vs RTF, one panel per batch size).
+
+# Day 2 — Adding language information (afternoon)
+
+## What was implemented
+- `greedy_ctc` (Eliote): argmax per frame, merge consecutive repeats, drop blanks, `|` -> space.
+- `sweep` (Yoan): one row per decoder configuration (greedy; beam without LM for each beam width; beam + KenLM n-gram for each alpha x beta x beam), with WER (jiwer) and decoding time per utterance.
+- Public tests: `pytest -m d2` -> 3 passed (bench_model, greedy_ctc, sweep).
+
+## Setup
+`python -m speech.ctc_lm --selftest`, then `python -m speech.ctc_lm --arpa data/lm/3-gram.pruned.1e-7.arpa`: wav2vec2-base-100h logits on 200 LibriSpeech test-clean utterances; grid alpha {0.3, 0.5, 1, 2} x beta {0, 1, 2} x N_beam {10, 50, 100} on the first 100 (dev); best point decoded once on the other 100 (test). Laptop CPU.
+
+## Results (test, 100 utterances)
+| Decoder | alpha | beta | N_beam | WER | ms/utt |
+|---|---:|---:|---:|---:|---:|
+| greedy (acoustic only) | 0 | 0 | 1 | 5.92% | 0.03 |
+| beam, no LM | 0 | 0 | 10 | 6.19% | 7.35 |
+| beam + 3-gram | 0.5 | 1.0 | 10 | 3.93% | 5.90 |
+
+Self-test (synthetic posteriors, 21-word vocabulary): greedy WER 0.33-0.93 -> beam + bigram 0.02-0.06.
+
+## Observations
+- The 3-gram LM removes about a third of the errors (5.9% -> 3.9%) for about 6 ms of decoding per utterance.
+- A beam without LM does not help (6.2% vs 5.9%): CTC posteriors are spiky, so the best alignment already carries the best text; the gain comes from rescoring complete words with the LM.
+- The best beam width (10) is the smallest of the grid: a narrower beam might be as accurate and faster.
+- The gain is much smaller than in the self-test (closed vocabulary, matching LM), as expected.
+- Decoding time excludes the acoustic model (logits precomputed).
+
+## Figure
+`results/figures/ctc_decoding_pareto.png` (dev configurations, WER vs decoding time).
