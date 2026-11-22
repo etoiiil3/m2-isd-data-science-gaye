@@ -19,7 +19,7 @@ LibriSpeech test-clean, 200 utterances (22.5 min of audio); whisper-base.en on t
 - On CPU, batch 16 is slower than batch 1 for every model: batching pads each utterance to the longest one, and without a GPU the padding is wasted compute.
 - wav2vec2-base-960h degrades from 3.3% to 24.5% WER when batched: the zero padding changes its internal normalisation. It must be run one utterance at a time.
 - Whisper's WER is inflated by formatting (numbers, abbreviations) that the provided normaliser does not map.
-- whisper-base.en was measured on 50 utterances only: its WER is not strictly comparable.
+- whisper-base.en was measured on 50 utterances only (about 1.2-1.5 s per utterance on CPU; the subject suggests `--n 50` for larger models on CPU): its WER is not strictly comparable to the models measured on 200 utterances.
 
 ## Figure
 `results/figures/asr_pareto.png` (WER vs RTF, one panel per batch size).
@@ -46,7 +46,10 @@ Self-test (synthetic posteriors, 21-word vocabulary): greedy WER 0.33-0.93 -> be
 ## Observations
 - The 3-gram LM removes about a third of the errors (5.9% -> 3.9%) for about 6 ms of decoding per utterance.
 - A beam without LM does not help (6.2% vs 5.9%): CTC posteriors are spiky, so the best alignment already carries the best text; the gain comes from rescoring complete words with the LM.
-- The best beam width (10) is the smallest of the grid: a narrower beam might be as accurate and faster.
+- The best beam width (10) is the smallest of the grid, but the WER is nearly flat in N_beam: for alpha 0.5, beta 1, N_beam 10 / 50 / 100 give 3.46% / 3.56% / 3.51% on dev. A narrower beam might be as accurate and faster.
+- A too-strong LM hurts: with alpha 2 the best dev WER is 6.43%, worse than greedy (6.11%). The LM then overrides what the acoustic model hears.
+- alpha 0.5, beta 1 is the best balance on dev (3.46%); alpha 1 is close (3.62%).
+- With the LM, decoding is faster than the beam without LM (about 6 vs 8-15 ms/utt): the LM scores prune bad prefixes early, so fewer hypotheses survive.
 - The gain is much smaller than in the self-test (closed vocabulary, matching LM), as expected.
 - Decoding time excludes the acoustic model (logits precomputed).
 
