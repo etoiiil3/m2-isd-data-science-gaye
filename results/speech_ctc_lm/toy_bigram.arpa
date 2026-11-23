@@ -1,0 +1,84 @@
+\data\
+ngram 1=23
+ngram 2=52
+
+\1-grams:
+-99	<s>	-3.602060
+-0.602060	the	-3.000000
+-1.404779	small	-2.623249
+-1.362761	dog	-2.665268
+-1.396134	ran	-2.410046
+-1.607890	under	-2.897260
+-1.611573	tree	-2.893577
+-0.903090	</s>
+-1.370336	red	-2.657693
+-1.400208	cat	-2.627821
+-1.370336	sat	-2.435844
+-1.571325	on	-2.933825
+-1.569979	garden	-2.935171
+-1.366532	big	-2.661497
+-1.378478	bird	-2.649551
+-1.602784	near	-2.902366
+-1.609359	over	-2.895791
+-1.374602	flew	-2.431578
+-1.592043	roof	-2.913107
+-1.620543	in	-2.884607
+-1.613798	mat	-2.891352
+-1.625099	house	-2.880051
+-6.000000	<unk>
+
+\2-grams:
+-0.000081	<s> the
+-0.802956	the small
+-0.478022	small dog
+-0.481726	dog ran
+-0.720814	ran under
+-0.000413	under the
+-1.009960	the tree
+-0.000486	tree </s>
+-0.768485	the red
+-0.504265	red cat
+-0.466325	cat sat
+-0.664795	sat on
+-0.000379	on the
+-0.968315	the garden
+-0.000441	garden </s>
+-0.764679	the big
+-0.490787	big bird
+-0.493419	bird ran
+-0.688854	ran near
+-0.000408	near the
+-0.693281	ran over
+-0.000414	over the
+-0.471624	red bird
+-0.485403	bird flew
+-0.670451	flew on
+-0.481719	dog sat
+-0.682836	sat near
+-0.990405	the roof
+-0.000464	roof </s>
+-0.490649	small cat
+-0.716867	sat in
+-0.000425	in the
+-1.012188	the mat
+-0.000488	mat </s>
+-0.498681	big cat
+-0.741901	sat over
+-1.023503	the house
+-0.000501	house </s>
+-0.727985	ran in
+-0.470483	dog flew
+-0.712601	flew in
+-0.465767	small bird
+-0.699522	flew under
+-0.459222	red dog
+-0.508213	cat ran
+-0.461036	cat flew
+-0.688922	flew over
+-0.699517	sat under
+-0.446244	big dog
+-0.455999	bird sat
+-0.732971	flew near
+-0.673701	ran on
+
+\end\

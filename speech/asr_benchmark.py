@@ -50,8 +50,46 @@ def bench_model(model_id, data, batch, device, fp16):
     - At batch 1 there is one latency per utterance; at batch > 1, one per batch (what a request in that batch
       waits). Compare throughput with rtf.
     """
-    raise NotImplementedError("TODO(d2): HF ASR pipeline at the requested batch size and dtype, warm-up, time every batch (sync GPU), return metrics (wer, rtf, latency percentiles, params, energy, memory) and hypotheses")
+    import torch
+    from transformers import pipeline
 
+    # 1. Load the model in a Hugging Face ASR pipeline (fp16 only on a GPU)
+    dtype = torch.float16 if (fp16 and device.startswith("cuda")) else torch.float32
+    asr = pipeline("automatic-speech-recognition", model=model_id, device=device, dtype=dtype)
+    # Moonshine has no pad token: needed to batch several utterances
+    if batch > 1 and getattr(asr, "tokenizer", None) is not None and asr.tokenizer.pad_token_id is None:
+        asr.tokenizer.pad_token_id = asr.model.config.eos_token_id
+
+    # 2. Model size
+    n_params = sum(p.numel() for p in asr.model.parameters())
+
+    # 3. Inputs in the format the pipeline expects; warm-up on 2 utterances (not timed)
+    inputs = [{"raw": d["audio"], "sampling_rate": d["sr"]} for d in data]
+    asr([dict(x) for x in inputs[:2]], batch_size=min(batch, 2))
+
+    # 4. Timed loop: one call per batch, fresh copies because the pipeline empties its inputs
+    reset_peak_memory()
+    lats, hyps, res = [], [], {}
+    with energy_scope(res):
+        t_all = time.perf_counter()
+        for i in range(0, len(inputs), batch):
+            chunk = [dict(x) for x in inputs[i:i + batch]]
+            t0 = time.perf_counter()
+            out = asr(chunk, batch_size=batch)
+            cuda_sync()  # GPU calls are asynchronous: wait before reading the clock
+            lats.append(time.perf_counter() - t0)
+            hyps.extend(o["text"] for o in out)
+        total = time.perf_counter() - t_all
+
+    # 5. Metrics
+    audio_s = sum(len(d["audio"]) / d["sr"] for d in data)
+    wer_value = wer([d["text"] for d in data], hyps)
+    rtf = total / audio_s
+    m = dict(wer=wer_value, rtf=rtf, n_params_M=n_params / 1e6,
+             energy_j_per_audio_min=(res["energy_j"] / audio_s * 60) if res.get("energy_j") is not None else None)
+    m.update(summarize_latencies(lats))  # lat_p50_ms, lat_p90_ms, ...
+    m.update(peak_memory_mb())           # cpu_maxrss_mb (+ gpu_peak_mb)
+    return m, hyps
 
 def plot(path, out_png=Path("results/figures/asr_pareto.png")):
     """One front per batch size (WER vs RTF) from the "asr" rows of a results file; the last run of a
