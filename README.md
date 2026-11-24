@@ -7,8 +7,8 @@ real-time constraints). Each group starts its own Git repository from it.
   https://ecampus.paris-saclay.fr/course/view.php?id=256459).
 - Start here: `SUBJECT.md` (what to do, day by day), `SUBMISSION_SPEC.md` (what to hand in), `DECISIONS.md`
   (your decision log). `ANNOUNCEMENT.md` and `WELCOME_SESSION.md` describe the course.
-- Lectures: `lectures/` — PDFs (notation summarised in the last slides); the lectures not yet converted are HTML
-  decks to open in a browser (arrows move, F fullscreen, N speaker notes).
+- Before you pull a course update: `PULL.md`.
+- Lectures: `lectures/` — PDFs (notation summarised in the last slides).
 - Working with an AI assistant: `AGENTS.md` is written for it (and for you): a map of the repository, the
   commands, and the rules it should follow.
 - Datasets are downloaded by `scripts/fetch_data.py` (same command on macOS, Linux and Windows) and are not in the
@@ -33,7 +33,7 @@ Open a new terminal, then create the environment (`pyproject.toml` and `uv.lock`
 run downloads about 1 GB) and the data:
 ```bash
 uv sync                                    # creates .venv with Python 3.12 and everything below
-uv run python scripts/fetch_data.py        # FSDD digits, LibriSpeech test-clean, 3-gram LM, demo model -> data/, models/
+uv run python scripts/fetch_data.py        # FSDD digits, LibriSpeech test-clean, 3-gram LM, demo models -> data/, models/
 uv run pytest -m d1                        # failing tests = what you must implement on day 1
 ```
 `uv run <command>` runs a command inside `.venv` without activating it. If you prefer to activate it, then drop
@@ -87,11 +87,13 @@ python -m pip install kenlm                # compiler needed, see above (skip it
   day 2. To use it, pick your CUDA index on https://pytorch.org/get-started/locally/ and run
   `uv pip install --reinstall torch --index-url <that index>`, then use `uv run --no-sync ...` so that uv keeps it.
 - **Downloads** can be rerun: finished steps are skipped. `python scripts/fetch_data.py --only fsdd` fetches the
-  10 MB of day 1 alone (also `librispeech`, `lm`, `model`, and the optional 1.3 GB 4-gram `lm4`).
+  10 MB of day 1 alone (also `librispeech`, `lm`, `model` and `model20m` for the demo's two streaming transducers,
+  and the optional 1.3 GB 4-gram `lm4`). Day 3 needs `model`, new on 19 November: rerun the command.
 - **`bash run_smoke.sh`** is a bash script. macOS and Linux: `uv run bash run_smoke.sh` (or activate the
-  environment first). Windows: the same command in Git Bash (installed with Git for Windows) or WSL; or paste its
-  lines into PowerShell one by one. Keep the lines of `run_smoke.sh` plain `python -m ...` commands, with no
-  bash-only syntax, so that they work in every shell.
+  environment first). Windows: the same command in Git Bash (installed with Git for Windows) or WSL; or in
+  PowerShell skip `set -euo pipefail` and paste only the `python -m ...` lines one by one. If you skip day 3's
+  optional stretch (`speech/streaming_live.py`), change its pytest line to `python -m pytest -q tests/public -m "not stretch"`.
+  Keep the lines of `run_smoke.sh` plain `python -m ...` commands, with no bash-only syntax, so that they work in every shell.
 
 ## Day 1
 The commands assume an activated environment; otherwise prefix each with `uv run`.
@@ -110,6 +112,9 @@ macOS, Linux and Windows; allow the microphone in the browser; a firewall prompt
 the demo only listens on this computer).
 The `digits/*` entries follow the day-1 lab: `digits/0-dtw-baseline` works at once; every other entry starts
 working when you implement the function it names (details: `asr_demo/digits.py`).
+Day 3: the reference is a streaming transducer (`reference/fastconformer-114M-int8`); register your own systems in
+`my_backends.py` (examples inside), and compare backends on the same recordings with
+`python -m asr_demo.replay --librispeech data/LibriSpeech --n 8 --backends ...` (no microphone needed).
 On Snowflake: see `snowflake/notebook_bootstrap.py` (first cell of your notebook).
 
 ## Layout

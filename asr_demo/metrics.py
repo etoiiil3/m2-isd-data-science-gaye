@@ -15,7 +15,10 @@ def wer_or_none(reference: str, hyp: str):
         return None
     import jiwer
     from speech.data import normalise
-    return float(jiwer.wer(normalise(reference), normalise(hyp) or "<empty>"))
+    ref = normalise(reference)
+    if not ref:
+        return None
+    return float(jiwer.wer(ref, normalise(hyp) or "<empty>"))
 
 
 def summarise(name, streaming, y, sr, compute_s, first_partial_ms, final_latency_ms, n_partials, text, reference, load_ms=0.0):
@@ -26,26 +29,41 @@ def summarise(name, streaming, y, sr, compute_s, first_partial_ms, final_latency
             "n_partials": n_partials, "wer": wer_or_none(reference, text), "load_ms": round(load_ms, 1)}
 
 
-def run_session_offline(backend, y, sr, reference="", realtime=False, chunk_s=0.1):
+def run_session_offline(backend, y, sr, reference="", realtime=False, chunk_s=0.1, keep_partials=False):
     """Feed a recording through a backend exactly like the browser does (100 ms chunks, then finish).
-    realtime=True sleeps so that audio arrives at the speed of speech (true first-partial latency)."""
+    realtime=True sleeps so that audio arrives at the speed of speech (true first-partial latency).
+    keep_partials=True adds "partials": [(t_s, text), ...], t_s = audio received when the partial came out
+    (realtime: wall-clock seconds since the start)."""
     from asr_demo.contract import resample
     y = resample(y, sr, backend.sample_rate)
     sr = backend.sample_rate
     s = backend.new_session()
     n = int(chunk_s * sr)
-    compute, first, nparts = 0.0, None, 0
+    compute, first, nparts, partials = 0.0, None, 0, []
+    t_free = 0.0
     t0 = time.perf_counter()
     for i in range(0, len(y), n):
+        chunk_end = min(i + n, len(y)) / sr
         if realtime:
-            time.sleep(max(0.0, t0 + i / sr - time.perf_counter()))
+            time.sleep(max(0.0, t0 + chunk_end - time.perf_counter()))
         c = time.perf_counter()
         txt = s.accept_chunk(y[i:i + n])
-        compute += time.perf_counter() - c
+        dt = time.perf_counter() - c
+        compute += dt
+        t_free = max(chunk_end, t_free) + dt
         if txt:
             nparts += 1
-            first = first or ((time.perf_counter() - t0) * 1000 if realtime else (i + n) / sr * 1000)
+            now_ms = (time.perf_counter() - t0) * 1000 if realtime else chunk_end * 1000
+            first = first or now_ms
+            partials.append((round(now_ms / 1000, 3), txt))
     c = time.perf_counter()
     final = s.finish()
-    fin = time.perf_counter() - c
-    return summarise(backend.name, backend.streaming, y, sr, compute + fin, first, fin * 1000, nparts, final, reference)
+    done = time.perf_counter()
+    fin = done - c
+    dur = len(y) / sr if len(y) else 0.0
+    t_free = max(dur, t_free) + fin
+    wait_s = max(fin, done - (t0 + dur)) if realtime else (t_free - dur)
+    m = summarise(backend.name, backend.streaming, y, sr, compute + fin, first, wait_s * 1000, nparts, final, reference)
+    if keep_partials:
+        m["partials"] = partials
+    return m

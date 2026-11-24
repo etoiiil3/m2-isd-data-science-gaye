@@ -12,9 +12,9 @@ budget, and defending each choice at the oral exam. Groups do not train neural m
 
 | Day | Lecture | Students implement (`TODO(dX)` stubs) | Benchmarks (`results/results.jsonl` rows) |
 |---|---|---|---|
-| d1 | L1, L2 | `common/pareto.py::pareto_mask_array`; `speech/ngram.py::NGramLM`; `speech/gmm_hmm.py`: `recognise_isolated`, `WordLoopDecoder._build`, `decode_emissions`, `train_bigram` | `gmm_isolated`, `ngram_lm`, `gmm_connected`, `gmm_beam` |
+| d1 | L1, L2 | reference solution on branch `solutions` since 17 Nov (never on `main`): `common/pareto.py::pareto_mask_array`; `speech/ngram.py::NGramLM`; `speech/gmm_hmm.py`: `recognise_isolated`, `WordLoopDecoder._build`, `decode_emissions`, `train_bigram` | `gmm_isolated`, `ngram_lm`, `gmm_connected`, `gmm_beam` |
 | d2 | L3, L4 | `speech/asr_benchmark.py::bench_model`; `speech/ctc_lm.py`: `greedy_ctc`, `sweep` | `asr`, `ctc_decoding` |
-| d3 | L5, L6 | `speech/streaming_sim.py::simulate_streaming`; stretch: `speech/streaming_live.py` | `asr_streaming` |
+| d3 | L5, L6 | `speech/streaming_sim.py`: `local_agreement`, `simulate_streaming`, `stream_native`; stretch: `speech/streaming_live.py::LocalAgreementSession` | `asr_streaming` |
 
 `SUBJECT.md` is the authority on what is required each day; `SUBMISSION_SPEC.md` on what is handed in.
 
@@ -24,13 +24,13 @@ budget, and defending each choice at the oral exam. Groups do not train neural m
 | `common/` | measurement harness (`bench.py`: timing, memory, result rows), Pareto tools (`pareto.py`) | provided, one stub |
 | `speech/` | pipeline stages; `run_classical_baseline.py` runs the day-1 benchmarks | provided, with stubs |
 | `asr_demo/` | live demo (server, page, backends, replay); `digits.py` = day-1 entries | provided |
-| `my_backends.py` | your systems registered in the demo | the group |
+| `my_backends.py` | your systems registered in the demo (examples inside: CTC + n-gram, streaming wrapper) | the group |
 | `notebooks/` | workbenches: they call the package and plot the results; no code to write in them | provided |
 | `tests/public/` | the contract of each stub, marked `d1`, `d2`, `d3`, `stretch` | provided, **do not edit** |
 | `lectures/` | slides; each stub has a slide with its equation or pseudocode, and the lab slide lists them | provided |
 | `results/` | `results.jsonl` (written by the scripts), `figures/`, `pareto.yaml` | the scripts and the group |
 | `DECISIONS.md` | one entry per scientific choice, with evidence | the group |
-| `scripts/fetch_data.py` | downloads data to `data/` and the demo model to `models/` (neither is committed); cross-platform | provided |
+| `scripts/fetch_data.py` | downloads data to `data/` and the demo models to `models/` (neither is committed); cross-platform | provided |
 | `pyproject.toml`, `uv.lock`, `requirements.txt` | the environment: `uv sync` (pinned by `uv.lock`) or `pip install -r requirements.txt` | provided; add a package to both |
 
 ## Commands
@@ -47,6 +47,8 @@ export DSP_MILESTONE=d1                        # tag every result row with the c
 python -m speech.run_classical_baseline --fsdd data/fsdd/recordings --part isolated   # also: lm, connected, beam, plot
 python -m speech.asr_benchmark                 # day 2 model zoo (CPU by default without a GPU); --plot draws the fronts
 python -m speech.ctc_lm --arpa data/lm/3-gram.pruned.1e-7.arpa                        # day 2 CTC + n-gram, tuned on dev
+python -m speech.streaming_sim                 # day 3 streaming front (~6 min, 7 rows); then --models <name> appends extra systems
+python -m asr_demo.replay --librispeech data/LibriSpeech --n 8 --backends ...      # day 3: backends on the same recordings
 jupyter lab notebooks/d1_afternoon.ipynb       # see what the code does
 python -m asr_demo.server                      # live demo, http://localhost:8000
 bash run_smoke.sh                              # < 10 min end-to-end check; uv run bash run_smoke.sh; Windows: Git Bash/WSL
@@ -55,8 +57,13 @@ Without uv: `python -m venv .venv`, activate it, `pip install -r requirements.tx
 day-2 steps for `pyctcdecode` and `kenlm`).
 
 ## Conventions in the code
-- A stub is `raise NotImplementedError("TODO(dX): <what to do>")`. Replace the `raise` by an implementation; keep
-  the signature and the docstring's contract. Everything that is not a stub is provided and tested.
+- A stub is `raise NotImplementedError("TODO(dX): <what to do>")`. On days 2 and 3 the functions are written
+  except a few lines: each `raise` sits where its lines go, and its message says what to write (replace it, keep
+  the indentation; a function can have several). On day 1 the `raise` stands for the whole body. Keep the
+  signature and the docstring's contract. Everything that is not a stub is provided and tested.
+- The day-1 reference solution is on branch `solutions` of the starter repository, not on `main`. Do not copy it
+  into the group's code unless the students ask for it; then copy only the files they name
+  (`git checkout course/solutions -- <file>`), never merge the branch.
 - The docstring and the lecture slide named on the lab slide give the equation. The public tests define
   "implemented", not "good": the benchmarks decide what is good.
 - Symbols follow the lectures' notation pages. Code names: `lm_weight` = λ, `word_penalty` = β (negative = a
@@ -78,7 +85,7 @@ day-2 steps for `pyctcdecode` and `kenlm`).
    from rows in `results/results.jsonl` or from a figure produced by the scripts. If a number is missing, run the
    experiment or say it is missing.
 5. **Experiments:** change one knob at a time; tune on development data and report on test data (the scripts
-   already split them); report latency with a tail percentile (`lat_p90_ms`), not only the mean; set
+   already split them); report offline latency with a tail percentile (`lat_p90_ms`), and day 3 with `lag_p50`/`lag_p90` and `finish_p50` (in seconds), not only the mean; set
    `DSP_MILESTONE` before running.
 6. **Every scientific choice gets a `DECISIONS.md` entry** (template inside): question, alternatives, protocol,
    evidence (rows or figure path), decision, what would change the decision. Offer to draft it from the

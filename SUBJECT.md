@@ -23,7 +23,7 @@ implement the scientific core of each stage (the `TODO(dX)` stubs), then benchma
   responsible for everything you submit, and you must be able to explain it.
 - Everything runs on a laptop CPU (macOS, Linux, Windows). A GPU (Snowflake) only speeds up the large models of day 2.
 - Live demo: `python -m asr_demo.server`, then http://localhost:8000. `bash run_smoke.sh` needs bash: `uv run bash run_smoke.sh`
-  (Windows: Git Bash or WSL, or paste its lines into PowerShell).
+  (Windows: Git Bash or WSL, or in PowerShell skip `set -euo pipefail` and paste only the `python -m ...` lines; pass `-m "not stretch"` to `pytest` if you skip the optional day-3 stretch).
 
 ## Day 1 — classical recognition (10 November)
 **Morning: the two components, each measured on its own.**
@@ -36,8 +36,8 @@ implement the scientific core of each stage (the `TODO(dX)` stubs), then benchma
 | Try it live | `python -m asr_demo.server`: say one digit to `digits/0-dtw-baseline` (provided), then to `digits/1-gmm` and `digits/2-hmm` (your `recognise_isolated`) |
 
 Each lab is planned for 2 h of work, which leaves time to get stuck and ask: the header of its notebook gives the
-timeline. Each day-1 function is one `TODO(d1)` stub for its whole body; from day 2, the functions to implement
-are written except a few lines, each marked by a `TODO(dX)` that says what goes there. **Since 17 November the
+timeline. Each day-1 function is one `TODO(d1)` stub for its whole body; on days 2 and 3, the functions to
+implement are written except a few lines, each marked by a `TODO(dX)` that says what goes there. **Since 17 November the
 day-1 reference solution is on branch `solutions` of the starter repository, never on `main`**, so pulling `main`
 never replaces your code. Compare it with your own, or take a function you need (`git fetch course`, then `git diff HEAD course/solutions -- speech/gmm_hmm.py` to compare, or `git checkout course/solutions -- speech/gmm_hmm.py` to take one file; use
 `origin` instead of `course` if that is your name for the starter repository). Your `d1` tag and rows stay as
@@ -73,20 +73,38 @@ delivered.
 | Deliver `d2` | rows `asr` (≥ 6) and `ctc_decoding` (≥ 6); fronts; ≥ 1 decision tagged d2 · `pytest -m d2` passes |
 
 ## Day 3 — deployment (24 November)
-**Morning: decide.** Merge your fronts (classical, neural, + LM). Measure the budget **on your laptop**
-(the demo machine): what final latency after release is acceptable, what RTF can it sustain? Choose the
-configurations to deploy and predict their latency and WER. Implement `speech/streaming_sim.py::simulate_streaming`
-and measure commit lag vs WER for ≥ 2 models × step ∈ {0.5, 1, 2} s.
+Like day 2, the day-3 functions are written except a few lines: each `TODO(d3)` says what goes there. First,
+`python scripts/fetch_data.py` (it skips what you have): the demo's reference streaming transducer changed on
+19 November (`reference/fastconformer-114M-int8`, about 100 MB).
 
-**Afternoon: the live demo (not graded).** `python -m asr_demo.server`, open `http://localhost:8000`.
-The provided reference is an on-device streaming recogniser (`reference/zipformer-20M-*`). Hijack the
-demo: register your systems in `my_backends.py` (contract in `asr_demo/contract.py`), implement the live
-LocalAgreement streamer (`speech/streaming_live.py`, `pytest -m stretch`), and compare backends **on the
-same recordings** (Replay button, `python -m asr_demo.replay`): what you hear vs first-partial latency,
-wait after release, RTF, WER. Did your prediction from the morning hold?
+**Morning: decide.**
 | | |
 |---|---|
-| Deliver `d3` | rows `asr_streaming` (≥ 3); `results/pareto.yaml` with your deployment budget; ≥ 1 decision tagged d3 (your deployment choice, and how the demo confirmed or contradicted it) · `pytest -m d3` passes |
+| Implement | `speech/streaming_sim.py`: `local_agreement` (1 hole), `simulate_streaming` (2 holes: the clock), `stream_native` (1 hole) |
+| Budget | merge your fronts and re-measure your candidates **on your laptop** (the demo machine): `python -m asr_demo.replay --librispeech data/LibriSpeech --n 8 --backends ...`. Set your budget (wait after release, WER) from the push-to-talk use case |
+| Benchmark | commit lag vs WER: `python -m speech.streaming_sim`, about 6 min on a laptop CPU: Whisper tiny and wav2vec2 re-decoded with LocalAgreement-2 at step ∈ {0.5, 1, 2} s, and the reference streaming transducer, on the same 20 LibriSpeech utterances. Run the default command first (7 rows); then append extra systems with `--models` (another model id, or a backend of `my_backends.py` — `--models` replaces the defaults for that call) |
+| See it | `notebooks/d3_morning.ipynb`: 4 candidates on the same recordings, the wait you predict, LocalAgreement and the clock on a mock, the transducer's partials, one utterance through three systems, your streaming front |
+| Decide | before the afternoon: the system you deploy, your budget, and your predicted first partial, wait after release and WER, in `DECISIONS.md` |
+
+**Afternoon: the live demo (not graded).** `python -m asr_demo.server`, open `http://localhost:8000`. The
+reference is an on-device streaming transducer (`reference/fastconformer-114M-int8`; a smaller one,
+`reference/zipformer-20M-*`, is there too).
+| | |
+|---|---|
+| Hijack | register your systems in `my_backends.py` (examples inside: your day-2 decoder with your λ, β, N_beam, and a streaming wrapper around it); contract in `asr_demo/contract.py` |
+| Stretch | `speech/streaming_live.py::LocalAgreementSession` (2 holes; it reuses your `local_agreement`), `pytest -m stretch` |
+| Compare | the same recordings on several backends (Replay button, `python -m asr_demo.replay`): what you hear vs first partial, wait after release, RTF, WER. Did your prediction from the morning hold? |
+| See it | `notebooks/d3_afternoon.ipynb`: the contract, what the demo lists, your systems, your live streamer partial by partial, replays, prediction vs measurement |
+| Deliver `d3` | rows `asr_streaming` (≥ 7: ≥ 2 re-decoded models × 3 steps + the reference transducer); `results/pareto.yaml` with your deployment budget (`wer_stream` min, `finish_p50` or `lag_p50` min, budget in **seconds**, e.g. `0.2` for 200 ms); ≥ 1 decision tagged d3 (your deployment choice, and how the demo confirmed or contradicted it) · `pytest -m d3` passes |
+
+Example `results/pareto.yaml` for day 3 (`budget` is in **seconds**, the unit of `finish_p50` and `lag_p50`):
+```yaml
+quality: {column: wer_stream, direction: min}
+cost:    {column: finish_p50, direction: min}
+budget:  0.2
+claimed_front: [...]
+chosen: ...
+```
 
 ## Final day — defence
 Tag `final` before: `REPORT.md` (sections in `SUBMISSION_SPEC.md`), slides, one controlled limits study

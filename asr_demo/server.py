@@ -46,9 +46,10 @@ def list_backends():
 
 
 def _log(m: dict, mode: str):
+    task = "demo" if mode == "live" else "demo_replay"
     cfg = {"mode": mode, "streaming": m.get("streaming"), "recording": m.get("recording")}
     keep = {k: v for k, v in m.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
-    log_record(BenchRecord("demo", m["backend"], cfg, keep), LOG)
+    log_record(BenchRecord(task, m["backend"], cfg, keep), LOG)
 
 
 @app.websocket("/ws")
@@ -72,38 +73,70 @@ async def ws_endpoint(ws: WebSocket):
         load_ms = (time.perf_counter() - t_load) * 1000
         session = backend.new_session()
         audio, compute, t0, first_partial, n_partials = [], 0.0, None, None, 0
-        while True:
-            msg = await ws.receive()
-            if msg.get("bytes") is not None:
-                chunk = np.frombuffer(msg["bytes"], dtype=np.float32).copy()
-                t0 = t0 or time.perf_counter()
-                audio.append(chunk)
-                c0 = time.perf_counter()
-                text = await asyncio.to_thread(session.accept_chunk, chunk)
-                compute += time.perf_counter() - c0
-                if text:
-                    n_partials += 1
-                    first_partial = first_partial or (time.perf_counter() - t0) * 1000
-                    await ws.send_json({"type": "partial", "text": text, "t_ms": (time.perf_counter() - t0) * 1000})
-            elif msg.get("text") is not None and json.loads(msg["text"]).get("type") == "stop":
-                t_stop = time.perf_counter()
-                final = await asyncio.to_thread(session.finish)
-                done = time.perf_counter()
-                compute += done - t_stop
-                y = np.concatenate(audio) if audio else np.zeros(0, np.float32)
-                rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
-                REC.mkdir(parents=True, exist_ok=True)
-                sf.write(REC / f"{rid}.wav", y, 16000)
-                if reference:
-                    (REC / f"{rid}.txt").write_text(reference, encoding="utf-8")
-                m = summarise(name, backend.streaming, y, 16000, compute, first_partial, (done - t_stop) * 1000,
-                              n_partials, final, reference, load_ms)
-                m["recording"] = rid
-                _log(m, "live")
-                await ws.send_json({"type": "final", **m})
-                return
-            elif msg.get("type") == "websocket.disconnect":
-                return
+        q: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
+
+        async def reader():
+            nonlocal t0
+            try:
+                while True:
+                    msg = await ws.receive()
+                    if msg.get("bytes") is not None:
+                        chunk = np.frombuffer(msg["bytes"], dtype=np.float32).copy()
+                        if t0 is None:
+                            t0 = time.perf_counter() - len(chunk) / 16000
+                        await q.put(("chunk", chunk))
+                    elif msg.get("text") is not None and json.loads(msg["text"]).get("type") == "stop":
+                        await q.put(("stop", time.perf_counter()))
+                        return
+                    elif msg.get("type") == "websocket.disconnect":
+                        await q.put(("disconnect", None))
+                        return
+            except WebSocketDisconnect:
+                await q.put(("disconnect", None))
+            except Exception as e:
+                await q.put(("error", e))
+
+        reader_task = asyncio.create_task(reader())
+        try:
+            while True:
+                kind, payload = await q.get()
+                if kind == "chunk":
+                    chunk = payload
+                    audio.append(chunk)
+                    c0 = time.perf_counter()
+                    text = await asyncio.to_thread(session.accept_chunk, chunk)
+                    compute += time.perf_counter() - c0
+                    if text:
+                        n_partials += 1
+                        now_ms = (time.perf_counter() - t0) * 1000
+                        first_partial = first_partial or now_ms
+                        await ws.send_json({"type": "partial", "text": text, "t_ms": now_ms})
+                elif kind == "stop":
+                    t_stop = payload
+                    c0 = time.perf_counter()
+                    final = await asyncio.to_thread(session.finish)
+                    done = time.perf_counter()
+                    compute += done - c0
+                    y = np.concatenate(audio) if audio else np.zeros(0, np.float32)
+                    rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+                    REC.mkdir(parents=True, exist_ok=True)
+                    sf.write(REC / f"{rid}.wav", y, 16000)
+                    if reference:
+                        (REC / f"{rid}.txt").write_text(reference, encoding="utf-8")
+                    m = summarise(name, backend.streaming, y, 16000, compute, first_partial, (done - t_stop) * 1000,
+                                  n_partials, final, reference, load_ms)
+                    m["recording"] = rid
+                    _log(m, "live")
+                    await ws.send_json({"type": "final", **m})
+                    return
+                elif kind == "disconnect":
+                    return
+                elif kind == "error":
+                    raise payload
+        finally:
+            reader_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await reader_task
     except WebSocketDisconnect:
         return
     except Exception as e:  # tell the browser why, instead of silently dropping the socket

@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""Data for the speech project (~500 MB, a few minutes): FSDD, LibriSpeech test-clean, a pruned 3-gram LM and the
-reference streaming model of the live demo. Pure standard library (urllib, zipfile, tarfile, gzip): the same
+"""Data for the speech project (~600 MB, a few minutes): FSDD, LibriSpeech test-clean, a pruned 3-gram LM and the
+two streaming models of the live demo. Pure standard library (urllib, zipfile, tarfile, gzip): the same
 command works on macOS, Linux and Windows, and needs no wget, tar, gunzip or git.
 
     python scripts/fetch_data.py                     # everything: data/ and models/ at the root of the repository
     python scripts/fetch_data.py D:\\asr_data         # another data folder (models/ stays at the repository root)
-    python scripts/fetch_data.py --only fsdd         # day 1 only (10 MB); also: librispeech, lm, model, lm4
+    python scripts/fetch_data.py --only fsdd         # day 1 only (10 MB); also: librispeech, lm, model, model20m, lm4
 
 What lands where (a step whose target exists is skipped, so the command can be rerun after a failure):
     fsdd          <DATA>/fsdd/recordings/*.wav              day 1, spoken digits (GitHub archive of the dataset)
     librispeech   <DATA>/LibriSpeech/test-clean/            days 2-3, 346 MB
     lm            <DATA>/lm/3-gram.pruned.1e-7.arpa         days 2-3, 3-gram LM, LOWER-CASED (wav2vec2 labels are
                                                             lower-cased in speech/ctc_lm.py), about 100 MB unpacked
-    model         <MODELS>/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/    the demo's reference recogniser, ~130 MB
+    model         <MODELS>/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8/   day 3: the
+                                                            reference streaming transducer of the demo, ~100 MB
+    model20m      <MODELS>/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/   day 3: a smaller streaming
+                                                            transducer (20M params), ~130 MB
     lm4           <DATA>/lm/4-gram.arpa                     OPTIONAL, only with --only lm4: day-2 stretch, 4-gram LM,
                                                             lower-cased; 1.3 GB download, ~3 GB unpacked, several GB
                                                             of RAM to load (a GPU machine, or a laptop with 16 GB)
@@ -46,8 +49,9 @@ FSDD_URL = ["https://github.com/Jakobovski/free-spoken-digit-dataset/archive/ref
 _SLR = ["https://www.openslr.org/resources", "https://openslr.elda.org/resources", "https://openslr.trmal.net/resources"]
 LIBRISPEECH_URL = [f"{m}/12/test-clean.tar.gz" for m in _SLR]
 LM_URL = [f"{m}/11/3-gram.pruned.1e-7.arpa.gz" for m in _SLR]
-MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-20M-2023-02-17"
-MODEL_URL = [f"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{MODEL_NAME}.tar.bz2"]
+MODEL_NAME = "sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8"   # day-3 reference (since 2026-11-19)
+MODEL20M_NAME = "sherpa-onnx-streaming-zipformer-en-20M-2023-02-17"
+SHERPA_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{}.tar.bz2"
 LM_FILE = "3-gram.pruned.1e-7.arpa"
 LM4_FILE = "4-gram.arpa"
 LM4_URL = [f"{m}/11/{LM4_FILE}.gz" for m in _SLR]
@@ -191,8 +195,9 @@ def fetch_lm(data: Path, models: Path, urls: list[str] = LM_URL, name: str = LM_
         os.replace(out, final)
 
 
-def fetch_model(data: Path, models: Path) -> None:
-    final = models / MODEL_NAME
+def fetch_model(data: Path, models: Path, name: str = MODEL_NAME) -> None:
+    """A sherpa-onnx release archive (<name>.tar.bz2, one folder <name>/ with tokens.txt) -> <MODELS>/<name>/."""
+    final = models / name
     if (final / "tokens.txt").exists():
         print("  already there, skipped")
         return
@@ -200,23 +205,25 @@ def fetch_model(data: Path, models: Path) -> None:
     with tempfile.TemporaryDirectory(dir=models) as tmp:
         tmp = Path(tmp)
         tb = tmp / "model.tar.bz2"
-        download(MODEL_URL, tb)
+        download([SHERPA_URL.format(name)], tb)
         _extract_tar(tb, tmp / "x", "r:bz2")
         tb.unlink()
-        if not (tmp / "x" / MODEL_NAME / "tokens.txt").exists():
-            raise RuntimeError(f"{MODEL_NAME}/tokens.txt not found in the archive")
-        _move_into_place(tmp / "x" / MODEL_NAME, final)
+        if not (tmp / "x" / name / "tokens.txt").exists():
+            raise RuntimeError(f"{name}/tokens.txt not found in the archive")
+        _move_into_place(tmp / "x" / name, final)
 
 
 STEPS = {
     "fsdd": ("FSDD (day 1, spoken digits, 10 MB)", fetch_fsdd),
-    "model": ("Reference on-device streaming model (sherpa-onnx zipformer, 20M params, ~130 MB) -> models/", fetch_model),
+    "model": ("Reference streaming transducer of the demo (NeMo fast-conformer, int8, ~100 MB) -> models/", fetch_model),
+    "model20m": ("Small streaming transducer of the demo (zipformer, 20M params, ~130 MB) -> models/",
+                 lambda data, models: fetch_model(data, models, MODEL20M_NAME)),
     "librispeech": ("LibriSpeech test-clean (days 2-3, 346 MB)", fetch_librispeech),
     "lm": ("Pruned 3-gram LM, lower-cased (days 2-3, ~34 MB download)", fetch_lm),
     "lm4": ("4-gram LM, lower-cased (optional day-2 stretch, 1.3 GB download)",
             lambda data, models: fetch_lm(data, models, LM4_URL, LM4_FILE)),
 }
-DEFAULT_STEPS = ["fsdd", "model", "librispeech", "lm"]   # lm4 only on request
+DEFAULT_STEPS = ["fsdd", "model", "model20m", "librispeech", "lm"]   # lm4 only on request
 
 
 def folder_size(p: Path) -> float:
@@ -226,7 +233,7 @@ def folder_size(p: Path) -> float:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("data", nargs="?", type=Path, default=Path("data"), help="data folder (default: data)")
-    ap.add_argument("--models", type=Path, default=ROOT / "models", help="folder of the demo model (default: <repository>/models)")
+    ap.add_argument("--models", type=Path, default=ROOT / "models", help="folder of the demo models (default: <repository>/models)")
     ap.add_argument("--only", nargs="+", choices=list(STEPS), help="run only these steps (default: all but lm4)")
     a = ap.parse_args()
     data, models = a.data.resolve(), a.models.resolve()

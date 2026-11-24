@@ -10,7 +10,7 @@ my_backends.py       your systems registered in the live demo (day 3, not graded
 REPORT.md            final only; level-2 headings: Task and constraints · Method · Benchmark protocol ·
                      Pareto analysis · Pipeline · Limits · Reproducibility · Contributions
 requirements.txt     keep it installable
-run_smoke.sh         < 10 min: reruns a SMALL version of your pipeline end to end
+run_smoke.sh         < 10 min: reruns a SMALL version of your pipeline end to end (add -m "not stretch" if skipping stretch)
 results/results.jsonl   one JSON line per measured configuration (written by the provided scripts)
 results/pareto.yaml     columns of your main front, budget, claimed front, chosen configuration
 results/figures/*.png   at least one Pareto plot per day
@@ -18,8 +18,9 @@ slides.pdf           final only
 ```
 
 Rows in `results.jsonl` must carry `task`, `model`, `cfg_milestone` (set `export DSP_MILESTONE=d1` before
-running) and the metric columns listed in `SUBJECT.md` for that milestone; latency always with a tail
-percentile (`lat_p90_ms`).
+running) and the metric columns listed in `SUBJECT.md` for that milestone; report offline latency with a tail
+percentile (`lat_p90_ms`), and day-3 streaming latency with `lag_p50`, `lag_p90` and `finish_p50` (median wait
+after release, in seconds).
 
 ## DECISIONS.md entry
 ```markdown
