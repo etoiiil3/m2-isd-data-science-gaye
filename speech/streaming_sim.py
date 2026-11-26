@@ -58,7 +58,10 @@ def local_agreement(history: list[list[str]], n_agree: int) -> list[str]:
     if len(history) < n_agree:
         return []
     last = history[len(history) - n_agree:]   # the n_agree most recent hypotheses
-    raise NotImplementedError("TODO(d3): agreed = the longest common prefix of the hypotheses in last (start from last[0], fold _common_prefix over the others); return it")
+    agreed = last[0]
+    for hypothesis in last[1:]:
+        agreed = _common_prefix(agreed, hypothesis)
+    return agreed
 
 
 def simulate_streaming(audio: np.ndarray, sr: int, transcribe: Callable[[np.ndarray], str], step_s: float = 1.0,
@@ -98,7 +101,7 @@ def simulate_streaming(audio: np.ndarray, sr: int, transcribe: Callable[[np.ndar
         text = transcribe(buf, buf_start) if getattr(transcribe, "wants_offset", False) else transcribe(buf)
         c = cost_model(len(buf) / sr) if cost_model else time.perf_counter() - w0
         compute.append(c)
-        raise NotImplementedError("TODO(d3): the clock: this update ends (and its words are shown) at t_free = start + c")
+        t_free = start + c
         tail = text.lower().split()[in_buf_committed:]
         history = (history + [tail])[-n_agree:]
         final = t >= dur
@@ -115,7 +118,7 @@ def simulate_streaming(audio: np.ndarray, sr: int, transcribe: Callable[[np.ndar
             committed.extend(rest)
             commit_times.extend([t_free] * len(rest))
             buf_start, in_buf_committed, history = t, 0, []
-        raise NotImplementedError("TODO(d3): the next update: when step_s more seconds of audio have arrived AND the model is free: t = the later of t + step_s and t_free")
+        t = max(t + step_s, t_free)
     return dict(text=" ".join(committed), words=committed, commit_times=np.array(commit_times),
                 updates=len(compute), mean_compute_s=float(np.mean(compute)), behind=bool(np.mean(compute) > step_s),
                 finish_delay_s=t_free - dur)
@@ -147,7 +150,7 @@ def stream_native(audio: np.ndarray, sr: int, backend, chunk_s: float = 0.1) -> 
         if text is None:
             continue
         words = text.lower().split()
-        raise NotImplementedError("TODO(d3): the stable words: every word of words except the last one (it may still grow), minus the len(committed) words already committed: new = words[:-1][len(committed):]")
+        new = words[:-1][len(committed):]
         committed.extend(new)
         commit_times.extend([t_free] * len(new))
     start = max(dur, t_free)                  # release: the final call starts when the last chunk is done
