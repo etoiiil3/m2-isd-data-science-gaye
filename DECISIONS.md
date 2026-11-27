@@ -11,7 +11,7 @@ exam asks you to defend them, including the alternatives you rejected.
 - Decision: use a weight of about 16 as the default. It helps in both domains. Weights of 32 to 64 are only better when we know the LM matches the data, and with a mismatched LM weight 64 is worse than no LM at all.
 - Would change our mind if: we knew the real digit statistics of the application (then a higher weight is safe), or if we tested on a different speaker or another set of recordings and the best weight moved.
 
-## D1 — Score beam width for connected-digit decoding   (milestone: d1)
+## D2 — Score beam width for connected-digit decoding   (milestone: d1)
 - Question: how aggressively can we prune HMM states while preserving recognition quality?
 - Alternatives: exact Viterbi search, score beams from 0 to 800, and top-N limits from 1 to 48 active states.
 - Protocol: compare on the same matched-text clean and 15 dB test conditions as the connected-digit experiment, using 150 test utterances per condition. Tune the insertion penalty on a separate 30-utterance development set. A search error means pruning did not retain the exact decoder's best-scoring path.
