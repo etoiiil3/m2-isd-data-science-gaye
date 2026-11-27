@@ -1,6 +1,6 @@
-# Your main Pareto front for the current milestone (update at every tag)
-quality: {column: FILL_ME, direction: max}      # e.g. mAP / max, wer / min
-cost:    {column: lat_p90_ms, direction: min}   # e.g. lat_p90_ms, rtf, energy_j_per_img
-budget:  FILL_ME                                # your real-time constraint, same unit as cost
-claimed_front: []                               # model values you claim are Pareto-optimal
-chosen: FILL_ME                                 # configuration used in your pipeline
+# Day 3: streaming front (wer_stream vs wait after release), laptop CPU, 20 LibriSpeech utterances
+quality: {column: wer_stream, direction: min}
+cost:    {column: finish_p50, direction: min}
+budget:  0.2
+claimed_front: [reference/fastconformer-114M-int8]
+chosen: facebook/wav2vec2-base-960h (local-agreement-2, step 0.5 s)
