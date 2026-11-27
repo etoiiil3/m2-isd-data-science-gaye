@@ -7,3 +7,4 @@ __pycache__/
 .ipynb_checkpoints/
 .DS_Store
 results/speech_classical/*.pkl
+results/librispeech_wavs/
