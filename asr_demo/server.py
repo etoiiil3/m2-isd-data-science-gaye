@@ -3,11 +3,12 @@
     python -m asr_demo.server            # then open http://localhost:8000
 
 Protocol (one WebSocket per recording, backend chosen per recording):
-  client -> {"type":"start","backend":NAME,"reference":optional text}
+  client -> {"type":"start","backend":NAME,"reference":optional text,"source":"mic" (default) or "file"}
   client -> binary chunks: float32 mono 16 kHz, ~100 ms each, while the record button is down
   client -> {"type":"stop"}
   server -> {"type":"loading"} (first use of a backend; the page also preloads it via POST /api/load on selection) · {"type":"partial","text","t_ms"} · {"type":"final",...metrics}
-Every request is logged to results/results.jsonl (task demo) and its audio saved for replay on other backends.
+Every request is logged to results/results.jsonl (task demo; demo_from_file for an uploaded WAV) and its audio
+saved for replay on other backends.
 """
 from __future__ import annotations
 
@@ -46,7 +47,7 @@ def list_backends():
 
 
 def _log(m: dict, mode: str):
-    task = "demo" if mode == "live" else "demo_replay"
+    task = {"live": "demo", "file": "demo_from_file"}.get(mode, "demo_replay")
     cfg = {"mode": mode, "streaming": m.get("streaming"), "recording": m.get("recording")}
     keep = {k: v for k, v in m.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
     log_record(BenchRecord(task, m["backend"], cfg, keep), LOG)
@@ -59,6 +60,7 @@ async def ws_endpoint(ws: WebSocket):
     try:
         start = json.loads(await ws.receive_text())
         name, reference = start["backend"], start.get("reference") or ""
+        mode = "file" if start.get("source") == "file" else "live"   # an uploaded WAV, streamed like the mic
         if name not in backends.REGISTRY:
             await ws.send_json({"type": "error", "message": f"unknown backend {name}"})
             return
@@ -126,7 +128,7 @@ async def ws_endpoint(ws: WebSocket):
                     m = summarise(name, backend.streaming, y, 16000, compute, first_partial, (done - t_stop) * 1000,
                                   n_partials, final, reference, load_ms)
                     m["recording"] = rid
-                    _log(m, "live")
+                    _log(m, mode)
                     await ws.send_json({"type": "final", **m})
                     return
                 elif kind == "disconnect":

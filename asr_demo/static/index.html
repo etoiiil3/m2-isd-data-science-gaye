@@ -28,6 +28,8 @@ select{min-width:320px}#rec{background:var(--rec);color:#fff;border:none;padding
   <div class="row"><label for="backend">Backend</label><select id="backend"></select><span id="status"></span></div>
   <div class="row" style="margin-top:12px"><label for="ref">Reference (optional, for WER)</label><input id="ref" placeholder="type what you will say, or pick a prompt"><button id="prompt">New prompt</button></div>
   <div class="row" style="margin-top:12px"><button id="rec">● Record</button><button id="replay" disabled>Replay last recording on this backend</button></div>
+  <div class="row" style="margin-top:12px"><label for="wav">Or a WAV file</label><input type="file" id="wav" accept=".wav,audio/*"><button id="sendwav" disabled>▶ Send file</button><label><input type="checkbox" id="hear" checked> play it aloud</label></div>
+  <p class="hint" style="margin:6px 0 0">The file is sent in 100 ms chunks at speaking speed, exactly like the microphone: the same metrics, saved like a recording (Replay works on it), logged as task <code>demo_from_file</code>. "Play it aloud" only lets the room hear it: the audio goes straight to the server, not through the microphone.</p>
   <div id="transcript"></div>
   <div class="m" id="metrics"></div>
 </div>
@@ -81,12 +83,38 @@ async function start(){if(recording)return;recording=true;$("status").classList.
   try{await ctx.audioWorklet.addModule(url)}finally{URL.revokeObjectURL(url)}if(!recording){release();return}
   node=new AudioWorkletNode(ctx,"tap");node.port.onmessage=e=>pushAudio(e.data);
   const z=ctx.createGain();z.gain.value=0;ctx.createMediaStreamSource(stream).connect(node);node.connect(z);z.connect(ctx.destination);}
-async function stop(){if(!recording)return;recording=false;$("rec").classList.remove("on");$("rec").textContent="● Record";
+async function stop(){if(!recording||fileMode)return;recording=false;$("rec").classList.remove("on");$("rec").textContent="● Record";
   if(pending.length&&ws&&ws.readyState===1)ws.send(Float32Array.from(pending.splice(0)).buffer);
   release();if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:"stop"}));$("status").textContent="decoding…"}}
 function show(m,mode){$("transcript").innerHTML=`<span class="final">${esc(m.text||"(empty)")}</span>`;
   $("metrics").innerHTML=[["first partial (ms)",fmt(m.first_partial_ms)],["wait after release (ms)",fmt(m.final_latency_ms)],["real-time factor",fmt(m.rtf,3)],["audio (s)",fmt(m.audio_s,2)],["WER",m.wer===null?"–":fmt(m.wer,2)],["load (ms)",fmt(m.load_ms)]].map(([k,v])=>`<div><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join("");
   hist.unshift({mode,...m});$("hist").innerHTML=hist.map(h=>`<tr><td>${esc(h.mode)}</td><td>${esc(h.backend)}</td><td>${fmt(h.audio_s,2)}</td><td>${fmt(h.first_partial_ms)}</td><td>${fmt(h.final_latency_ms)}</td><td>${fmt(h.rtf,3)}</td><td>${h.wer===null?"–":fmt(h.wer,2)}</td><td class="t">${esc(h.text)}</td></tr>`).join("");loadBackends();}
+// WAV upload: decode in the page, resample to 16 kHz mono, then stream it like the microphone (100 ms chunks, real time).
+let fileMode=false,wavData=null,wavBuf=null;
+$("wav").onchange=async()=>{const f=$("wav").files[0];wavData=null;wavBuf=null;$("sendwav").disabled=true;if(!f)return;
+  try{const ac=new AudioContext();wavBuf=await ac.decodeAudioData(await f.arrayBuffer());ac.close();
+    const oc=new OfflineAudioContext(1,Math.ceil(wavBuf.duration*16000),16000);const src=oc.createBufferSource();src.buffer=wavBuf;src.connect(oc.destination);src.start();
+    wavData=(await oc.startRendering()).getChannelData(0).slice();
+    $("status").classList.remove("err");$("status").textContent=`${f.name}: ${wavBuf.duration.toFixed(2)} s, ready`;$("sendwav").disabled=false}
+  catch(e){showError("cannot read this file: "+e.message)}};
+function endFile(){recording=false;fileMode=false;$("rec").disabled=false;$("sendwav").disabled=!wavData;if(ctx){ctx.close();ctx=null}}
+async function sendFile(){if(recording||!wavData)return;recording=true;fileMode=true;$("rec").disabled=true;$("sendwav").disabled=true;
+  $("status").classList.remove("err");$("transcript").innerHTML="";$("metrics").innerHTML="";
+  const sock=ws=new WebSocket(`ws://${location.host}/ws`);sock.binaryType="arraybuffer";
+  sock.onmessage=e=>{if(ws!==sock)return;const m=JSON.parse(e.data);if(m.type==="loading")$("status").textContent="loading model…";
+    if(m.type==="partial")$("transcript").innerHTML=`<span class="partial">${esc(m.text)}</span>`;
+    if(m.type==="final"){$("status").textContent="";endFile();show(m,"file");lastRec=m.recording;$("replay").disabled=false}
+    if(m.type==="error"){endFile();showError(m.message)}};
+  sock.onclose=()=>{if(ws!==sock)return;if(fileMode){endFile();showError("the server closed the connection: see its terminal")}};
+  if(!await new Promise(r=>{sock.onopen=()=>r(true);sock.onerror=()=>r(false)})){endFile();showError("cannot reach the server's /ws (is it running? see its terminal)");return}
+  sock.send(JSON.stringify({type:"start",backend:$("backend").value,reference:$("ref").value,source:"file"}));
+  $("status").textContent="sending the file at speaking speed…";
+  if($("hear").checked){ctx=new AudioContext();const src=ctx.createBufferSource();src.buffer=wavBuf;src.connect(ctx.destination);src.start()}
+  const t0=performance.now();
+  for(let k=0,i=0;i<wavData.length;k++,i+=1600){const wait=t0+(k+1)*100-performance.now();if(wait>0)await new Promise(r=>setTimeout(r,wait));
+    if(ws!==sock||sock.readyState!==1||!fileMode)return;sock.send(wavData.slice(i,i+1600).buffer)}
+  sock.send(JSON.stringify({type:"stop"}));$("status").textContent="decoding…"}
+$("sendwav").onclick=sendFile;
 $("rec").onclick=()=>recording?stop():start();
 document.addEventListener("keydown",e=>{if(e.code==="Space"&&!e.repeat&&document.activeElement.tagName!=="INPUT"){e.preventDefault();start()}});
 document.addEventListener("keyup",e=>{if(e.code==="Space"&&document.activeElement.tagName!=="INPUT"){e.preventDefault();stop()}});
